@@ -1,0 +1,154 @@
+"""
+notify.py — Operator notification emails.
+Sends phase summaries and alert emails via Gmail App Password (not Brevo).
+Brevo is reserved for prospect outreach only.
+"""
+
+import logging
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timezone
+
+from config import GMAIL_SENDER, GMAIL_APP_PASSWORD, NOTIFY_EMAIL
+
+logger = logging.getLogger(__name__)
+
+GMAIL_HOST = "smtp.gmail.com"
+GMAIL_PORT = 587
+
+
+def _send_via_gmail(subject: str, body: str) -> bool:
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = GMAIL_SENDER
+    msg["To"] = NOTIFY_EMAIL
+    msg.attach(MIMEText(body, "plain"))
+
+    try:
+        with smtplib.SMTP(GMAIL_HOST, GMAIL_PORT, timeout=30) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(GMAIL_SENDER, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_SENDER, [NOTIFY_EMAIL], msg.as_string())
+        logger.info(f"[NOTIFY] Sent: {subject}")
+        return True
+    except Exception as e:
+        logger.error(f"[NOTIFY] Gmail send failed: {e}")
+        return False
+
+
+def send_run_summary(
+    new_leads: int = 0,
+    dupes_skipped: int = 0,
+    enrichment_results: dict = None,
+    followup_staged: int = 0,
+    errors: list[str] = None,
+) -> None:
+    """Phase 1 summary email to operator."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    enrichment_results = enrichment_results or {}
+    errors = errors or []
+
+    lines = [
+        f"Lead Manager — Phase 1 Summary",
+        f"Run time: {now}",
+        "",
+        f"New leads written:     {new_leads}",
+        f"Duplicates skipped:    {dupes_skipped}",
+        f"Follow-ups staged:     {followup_staged}",
+        "",
+        "Enrichment results:",
+        f"  Prospeo enriched:    {enrichment_results.get('prospeo', 0)}",
+        f"  Apify enriched:      {enrichment_results.get('apify', 0)}",
+        f"  Serper enriched:     {enrichment_results.get('serper', 0)}",
+        f"  Auto-deleted (no email): {enrichment_results.get('deleted', 0)}",
+    ]
+
+    if errors:
+        lines += ["", f"Errors ({len(errors)}):"]
+        for err in errors[:20]:
+            lines.append(f"  - {err}")
+        if len(errors) > 20:
+            lines.append(f"  ... and {len(errors) - 20} more. Check pipeline_errors.jsonl.")
+    else:
+        lines += ["", "No errors."]
+
+    _send_via_gmail(
+        subject=f"[Lead Manager] Phase 1 Summary — {now}",
+        body="\n".join(lines),
+    )
+
+
+def send_outreach_summary(
+    initial_sent: int = 0,
+    followup_sent: int = 0,
+    failed: int = 0,
+    cap_hit: bool = False,
+    health_degraded: bool = False,
+    errors: list[str] = None,
+) -> None:
+    """Phase 2 summary email to operator."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    errors = errors or []
+
+    lines = [
+        f"Lead Manager — Phase 2 Outreach Summary",
+        f"Run time: {now}",
+        "",
+        f"Touch 1 (initial) sent:   {initial_sent}",
+        f"Touch 2/3 (follow-up) sent: {followup_sent}",
+        f"Failed sends:             {failed}",
+        f"Daily cap hit:            {'YES' if cap_hit else 'no'}",
+        f"SMTP health degraded:     {'YES — CHECK IMMEDIATELY' if health_degraded else 'no'}",
+    ]
+
+    if errors:
+        lines += ["", f"Errors ({len(errors)}):"]
+        for err in errors[:20]:
+            lines.append(f"  - {err}")
+    else:
+        lines += ["", "No errors."]
+
+    subject = f"[Lead Manager] Phase 2 Summary — {now}"
+    if health_degraded:
+        subject = f"[ALERT] SMTP Health Degraded — {now}"
+
+    _send_via_gmail(subject=subject, body="\n".join(lines))
+
+
+def alert_scrape_zero_results(source: str) -> None:
+    """Alert operator when a discovery source returns zero leads."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    _send_via_gmail(
+        subject=f"[Lead Manager] Zero Results — {source} — {now}",
+        body=(
+            f"Source '{source}' returned zero leads at {now}.\n\n"
+            f"Pipeline continued with remaining sources.\n"
+            f"Check source health or ICP filters if this repeats."
+        ),
+    )
+
+
+def alert_smtp_degraded(fail_rate: float, errors: list[str]) -> None:
+    """Alert operator when SMTP health threshold is breached."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    error_lines = "\n".join(f"  - {e}" for e in errors[:10])
+    _send_via_gmail(
+        subject=f"[ALERT] SMTP Health Degraded — {now}",
+        body=(
+            f"SMTP failure rate: {fail_rate:.0%}\n"
+            f"Threshold: >50% after 5+ sends.\n\n"
+            f"Outreach halted. Check Brevo credentials and sending domain.\n\n"
+            f"Recent errors:\n{error_lines}"
+        ),
+    )
+
+
+def alert_pipeline_error(stage: str, message: str) -> None:
+    """Generic pipeline error alert."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    _send_via_gmail(
+        subject=f"[Lead Manager] Error in {stage} — {now}",
+        body=f"Stage: {stage}\nTime: {now}\n\nError:\n{message}",
+    )

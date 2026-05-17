@@ -1,0 +1,49 @@
+name: phase2-outreach
+
+on:
+  schedule:
+    - cron: "0 10 * * *"   # daily 10:00 UTC
+  workflow_dispatch:         # manual trigger from Actions tab
+
+jobs:
+  outreach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Phase 2 outreach
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          FOLLOWUP_DELAY_DAYS: ${{ vars.FOLLOWUP_DELAY_DAYS }}
+          MAX_FOLLOWUPS: ${{ vars.MAX_FOLLOWUPS }}
+          GAMMA_URL: ${{ vars.GAMMA_URL }}
+        run: python active/outreach/main.py
+
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-logs-${{ github.run_id }}
+          path: |
+            logs/phase2_run.log
+            active/leads/pipeline_errors.jsonl
+            active/leads/template_metrics.tsv
+          retention-days: 30

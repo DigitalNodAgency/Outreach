@@ -1,0 +1,27 @@
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Data files — gitignored, generated at runtime
+active/leads/*
+!active/leads/.gitkeep
+*.tsv
+*.jsonl
+*.csv
+
+# Logs — keep folder, ignore content
+logs/*
+!logs/.gitkeep
+*.log
+
+# Credentials — keep folder, ignore content
+credentials/*
+!credentials/.gitkeep
+
+# Pipeline state
+PIPELINE_PAUSED
