@@ -34,7 +34,7 @@ jobs:
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
           FOLLOWUP_DELAY_DAYS: ${{ vars.FOLLOWUP_DELAY_DAYS }}
           MAX_FOLLOWUPS: ${{ vars.MAX_FOLLOWUPS }}
-          GAMMA_URL: ${{ vars.GAMMA_URL }}
+          CALENDLY_URL: ${{ vars.CALENDLY_URL }}
         run: python active/outreach/main.py
 
       - name: Upload run logs

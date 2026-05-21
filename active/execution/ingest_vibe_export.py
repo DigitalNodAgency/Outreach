@@ -61,6 +61,10 @@ def _normalize_record(raw: dict, source_tag: str) -> dict | None:
         log_failed_record(raw, reason="missing_company")
         return None
 
+    # Social URLs — map from Vibe export columns if present, otherwise empty
+    facebook_url = raw.get("facebook_url", raw.get("facebook", "")).strip()
+    linkedin_url = raw.get("linkedin_url", raw.get("linkedin", "")).strip()
+
     return {
         "name": name,
         "email": email.lower(),
@@ -71,6 +75,8 @@ def _normalize_record(raw: dict, source_tag: str) -> dict | None:
         "last_contacted": "",
         "followup_count": 0,
         "notes": f"source:{source_tag}",
+        "facebook_url": facebook_url,
+        "linkedin_url": linkedin_url,
     }
 
 

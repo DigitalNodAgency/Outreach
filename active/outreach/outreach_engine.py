@@ -11,7 +11,7 @@ from config import (
     FOLLOWUP_DELAY_DAYS, MAX_FOLLOWUPS, TEMPLATES_DIR,
     STATUS_NEW, STATUS_OUTREACH_SENT, STATUS_FOLLOWUP_SENT,
     STATUS_CLOSED, STATUS_FAILED, REGION_TEMPLATE_MAP, DEFAULT_TEMPLATE_PREFIX,
-    DAILY_EMAIL_CAP,
+    DAILY_EMAIL_CAP, CALENDLY_URL,
 )
 from smtp_client import send_email, is_cap_hit, get_session
 
@@ -36,10 +36,12 @@ def _load_template(prefix: str, touch_number: int) -> tuple[str, str]:
 
 
 def _render_template(subject: str, body: str, name: str, company: str) -> tuple[str, str]:
-    """Replace {{name}} and {{company}} placeholders."""
+    """Replace {{name}}, {{company}}, and {{calendly_url}} placeholders."""
     first_name = name.split()[0] if name.strip() else "there"
-    subject = subject.replace("{{name}}", first_name).replace("{{company}}", company)
-    body = body.replace("{{name}}", first_name).replace("{{company}}", company)
+    replacements = [("{{name}}", first_name), ("{{company}}", company), ("{{calendly_url}}", CALENDLY_URL)]
+    for placeholder, value in replacements:
+        subject = subject.replace(placeholder, value)
+        body = body.replace(placeholder, value)
     return subject, body
 
 

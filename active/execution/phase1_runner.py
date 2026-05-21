@@ -1,6 +1,6 @@
 """
 phase1_runner.py — Phase 1 full orchestrator.
-Entry point for Windows Task Scheduler.
+Entry point for GitHub Actions (phase1-discovery.yml) and Windows Task Scheduler.
 Runs: source health check → Vibe ingest → Prospeo fallback →
 enrichment → follow-up staging → summary email.
 """
@@ -16,12 +16,15 @@ from config import PIPELINE_PAUSED_FLAG, FOLLOWUP_DELAY_DAYS, VIBE_EXPORT_CSV
 from pipeline_metrics import read_pipeline_errors, log_pipeline_error
 from notify import send_run_summary
 
+_LOG_DIR = Path(__file__).parents[2] / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(str(Path(__file__).parents[2] / "logs" / "phase1_run.log"), mode="a"),
+        logging.FileHandler(str(_LOG_DIR / "phase1_run.log"), mode="a"),
     ],
 )
 logger = logging.getLogger(__name__)

@@ -44,8 +44,8 @@ SEND_DELAY_SECONDS = float(os.getenv("SEND_DELAY_SECONDS", "5"))
 SMTP_HEALTH_MIN_SENDS = int(os.getenv("SMTP_HEALTH_MIN_SENDS", "5"))
 SMTP_HEALTH_FAIL_THRESHOLD = float(os.getenv("SMTP_HEALTH_FAIL_THRESHOLD", "0.5"))
 
-# ── Landing page ───────────────────────────────────────────────────────────────
-GAMMA_URL = os.getenv("GAMMA_URL", "")
+# ── Landing page / booking ─────────────────────────────────────────────────────
+CALENDLY_URL = os.getenv("CALENDLY_URL", "")
 
 # ── Template directory ─────────────────────────────────────────────────────────
 TEMPLATES_DIR = os.getenv("TEMPLATES_DIR") or str(_ROOT / "active" / "outreach" / "templates")
@@ -61,10 +61,13 @@ COL_STATUS = 5
 COL_LAST_CONTACTED = 6
 COL_FOLLOWUP_COUNT = 7
 COL_NOTES = 8
+COL_FACEBOOK_URL = 9
+COL_LINKEDIN_URL = 10
 
 LEADS_HEADERS = [
     "name", "email", "company", "region", "warmth_score",
-    "status", "last_contacted", "followup_count", "notes"
+    "status", "last_contacted", "followup_count", "notes",
+    "facebook_url", "linkedin_url",
 ]
 
 # outreach_log tab (0-indexed)
@@ -84,6 +87,11 @@ OUTREACH_LOG_HEADERS = [
 # Outreach Reply Log tab
 REPLY_LOG_HEADERS = [
     "lead_email", "lead_name", "reply_date", "subject", "snippet"
+]
+
+# Social log tab
+SOCIAL_LOG_HEADERS = [
+    "lead_email", "lead_name", "platform", "profile_url", "sent_date", "status", "notes"
 ]
 
 # ── Region → template series routing ──────────────────────────────────────────
@@ -109,6 +117,13 @@ STATUS_FAILED = "failed"
 # ── Discovery ─────────────────────────────────────────────────────────────────
 MAX_LEADS_PER_RUN = int(os.getenv("MAX_LEADS_PER_RUN", "100"))
 STRUCTURING_BATCH_SIZE = 10
+
+# ── PhantomBuster (social outreach) ───────────────────────────────────────────
+PHANTOMBUSTER_API_KEY = os.getenv("PHANTOMBUSTER_API_KEY", "")
+PHANTOMBUSTER_FB_PHANTOM_ID = os.getenv("PHANTOMBUSTER_FB_PHANTOM_ID", "")
+PHANTOMBUSTER_LI_PHANTOM_ID = os.getenv("PHANTOMBUSTER_LI_PHANTOM_ID", "")
+SOCIAL_PLATFORM = os.getenv("SOCIAL_PLATFORM", "both")  # facebook / linkedin / both
+DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
 # ── ICP filters (filled after client onboarding) ───────────────────────────────
 ICP_PERSONA = os.getenv("ICP_PERSONA", "[CLIENT_ICP_PERSONA]")

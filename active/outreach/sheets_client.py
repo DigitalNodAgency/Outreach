@@ -13,9 +13,9 @@ from google.oauth2.service_account import Credentials
 
 from config import (
     GOOGLE_SERVICE_ACCOUNT_JSON, SPREADSHEET_ID,
-    LEADS_HEADERS, OUTREACH_LOG_HEADERS, REPLY_LOG_HEADERS,
+    LEADS_HEADERS, OUTREACH_LOG_HEADERS, REPLY_LOG_HEADERS, SOCIAL_LOG_HEADERS,
     COL_EMAIL, COL_STATUS, COL_LAST_CONTACTED, COL_FOLLOWUP_COUNT,
-    COL_NAME, COL_COMPANY, COL_REGION,
+    COL_NAME, COL_COMPANY, COL_REGION, COL_FACEBOOK_URL, COL_LINKEDIN_URL,
     OLOG_LEAD_EMAIL, OLOG_STAGE_NUMBER,
     STATUS_NEW, STATUS_FAILED,
 )
@@ -99,6 +99,8 @@ def append_leads_batch(leads: list[dict]) -> int:
             lead.get("last_contacted", ""),
             lead.get("followup_count", 0),
             lead.get("notes", ""),
+            lead.get("facebook_url", ""),
+            lead.get("instagram_url", ""),
         ]
         rows.append(row)
 
@@ -320,3 +322,36 @@ def get_all_lead_emails_from_log() -> set[str]:
     ws = _get_sheet("outreach_log")
     rows = ws.get_all_values()
     return {row[OLOG_LEAD_EMAIL].lower() for row in rows[1:] if row}
+
+
+# ── Social outreach ────────────────────────────────────────────────────────────
+
+def get_leads_for_social_outreach(platform: str) -> list[dict]:
+    """
+    Return leads that have a profile URL for the given platform and are not closed/replied.
+    platform: 'facebook' or 'linkedin'
+    """
+    col = "facebook_url" if platform == "facebook" else "linkedin_url"
+    excluded = {"replied", "closed"}
+    all_leads = get_all_leads()
+    return [
+        r for r in all_leads
+        if r.get(col, "").strip()
+        and r.get("status", "").lower() not in excluded
+    ]
+
+
+def append_social_log(entry: dict) -> None:
+    """Append a row to the social_log tab."""
+    ws = _get_sheet("social_log")
+    ensure_headers("social_log", SOCIAL_LOG_HEADERS)
+    row = [
+        entry.get("lead_email", ""),
+        entry.get("lead_name", ""),
+        entry.get("platform", ""),
+        entry.get("profile_url", ""),
+        entry.get("sent_date", ""),
+        entry.get("status", ""),
+        entry.get("notes", ""),
+    ]
+    ws.append_row(row, value_input_option="RAW")

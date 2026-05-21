@@ -1,0 +1,61 @@
+name: social-outreach
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Platform to target (facebook / linkedin / both)"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - facebook
+          - linkedin
+          - both
+      dry_run:
+        description: "Dry run — log targets without launching PhantomBuster"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  social:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run social outreach
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          PHANTOMBUSTER_API_KEY: ${{ secrets.PHANTOMBUSTER_API_KEY }}
+          PHANTOMBUSTER_FB_PHANTOM_ID: ${{ secrets.PHANTOMBUSTER_FB_PHANTOM_ID }}
+          PHANTOMBUSTER_LI_PHANTOM_ID: ${{ secrets.PHANTOMBUSTER_LI_PHANTOM_ID }}
+          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          SOCIAL_PLATFORM: ${{ github.event.inputs.platform }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: python active/outreach/social_main.py
+
+      - name: Upload social logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: social-logs-${{ github.run_id }}
+          path: logs/social_run.log
+          retention-days: 30

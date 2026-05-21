@@ -8,7 +8,7 @@
 
 **What it does:** Two-phase autonomous B2B lead pipeline. Phase 1 handles discovery, structuring, deduplication, and enrichment on a local Windows schedule. Phase 2 handles outreach sequencing, follow-up automation, and Brevo reconciliation via GitHub Actions.
 **Success metric:** Qualified leads with verified emails reaching `status=outreach_sent` within 24 hours of discovery, with zero duplicate sends and accurate Brevo reconciliation on every run.
-**Stack:** Python 3.11, Google Sheets API, Brevo SMTP + API, GitHub Actions, Windows Task Scheduler, Vibe Prospecting MCP, Prospeo API, Apify Contact Info Scraper, Serper API, Gmail SMTP
+**Stack:** Python 3.11, Google Sheets API, Brevo SMTP + API, GitHub Actions, Windows Task Scheduler, Vibe Prospecting MCP, Prospeo API, Apify Contact Info Scraper, Serper API, Gmail SMTP, PhantomBuster (Facebook + LinkedIn social outreach)
 **Type:** Freelance Deliverable / AI Agent
 
 ---
@@ -156,38 +156,44 @@ Lessons log: [active/research/lessons.md](active/research/lessons.md)
 
 ## 11. Environment
 
+> All credentials are client-owned. Never substitute operator keys. Await client onboarding before filling any credential field.
+
 ### Phase 1 — local `.env` (never committed)
 ```
-PROSPEO_API_KEY          Prospeo discovery + enrichment
-APIFY_API_TOKEN          Apify Contact Info Scraper (Tier 1 enrichment)
-SERPER_API_KEY           Serper fallback scrape (Tier 2 enrichment)
+PROSPEO_API_KEY          Client's Prospeo key — discovery + enrichment
+APIFY_API_TOKEN          Client's Apify token — Contact Info Scraper (Tier 1)
+SERPER_API_KEY           Client's Serper key — fallback scrape (Tier 2)
+VIBE_PROSPECTING_API_KEY Client's Vibe Prospecting key — primary discovery
 MAX_LEADS_PER_RUN        Discovery cap per run (default 100)
-ICP_PERSONA              Target job title(s)
-ICP_COMPANY_SIZE         Target employee range
-ICP_INDUSTRIES           Target industries (comma-separated)
-ICP_REGIONS              Target regions (comma-separated)
-ICP_DISQUALIFY           Disqualification conditions
+ICP_PERSONA              Target job title(s) — set after onboarding call
+ICP_COMPANY_SIZE         Target employee range — set after onboarding call
+ICP_INDUSTRIES           Target industries (comma-separated) — set after onboarding call
+ICP_REGIONS              Target regions (comma-separated) — set after onboarding call
+ICP_DISQUALIFY           Disqualification conditions — set after onboarding call
 ```
 
 ### Phase 2 — GitHub repo secrets
 ```
-GOOGLE_SERVICE_ACCOUNT_JSON    Full JSON of service account file
-SPREADSHEET_ID                 Google Sheet ID
-SMTP_USER                      Brevo sender email
-SMTP_PASS                      Brevo SMTP password
-BREVO_API_KEY                  Brevo API key
-GMAIL_SENDER                   Gmail address for operator alerts
-GMAIL_APP_PASSWORD             Gmail app password
-NOTIFY_EMAIL                   Where summary emails go
-IMAP_HOST                      IMAP server (reply logger)
-IMAP_PASS                      IMAP app password (reply logger)
+GOOGLE_SERVICE_ACCOUNT_JSON    Client's service account JSON
+SPREADSHEET_ID                 Client's Google Sheet ID
+SMTP_USER                      Client's Brevo sender email
+SMTP_PASS                      Client's Brevo SMTP password
+BREVO_API_KEY                  Client's Brevo API key
+GMAIL_SENDER                   Client's Gmail address for operator alerts
+GMAIL_APP_PASSWORD             Client's Gmail App Password (same value as IMAP_PASS if same inbox)
+NOTIFY_EMAIL                   Client's email for summary reports
+IMAP_HOST                      imap.gmail.com (fixed)
+IMAP_PASS                      Client's Gmail App Password for reply logger (same as GMAIL_APP_PASSWORD if same inbox)
+PHANTOMBUSTER_API_KEY          Client's PhantomBuster API key — social outreach
+PHANTOMBUSTER_FB_PHANTOM_ID    PhantomBuster Facebook Message Sender phantom ID
+PHANTOMBUSTER_LI_PHANTOM_ID    PhantomBuster LinkedIn Message Sender phantom ID
 ```
 
 ### Phase 2 — GitHub repo variables (non-secret)
 ```
 FOLLOWUP_DELAY_DAYS    Days between touches (default 4)
 MAX_FOLLOWUPS          Max touches per lead (default 3)
-GAMMA_URL              Landing page URL injected into templates
+GAMMA_URL              Client's landing page URL injected into templates
 ```
 
 ---
@@ -196,6 +202,7 @@ GAMMA_URL              Landing page URL injected into templates
 > Format: [vN | YYYY-MM-DD | description]
 
 - [v1 | 2026-05-17 | Initial project restructure to spec layout. Flat-root → active/ hierarchy. Absolute file paths in config. Log files routed to logs/.]
+- [v2 | 2026-05-21 | Social outreach added: PhantomBuster Facebook + LinkedIn via social-outreach.yml (manual dispatch). Leads sheet col K = linkedin_url. Instagram replaced by LinkedIn throughout.]
 
 ---
 
