@@ -1,8 +1,8 @@
 name: phase2-outreach
 
 on:
-  schedule:
-    - cron: "0 10 * * *"   # daily 10:00 UTC
+  # schedule:
+  #   - cron: "0 10 * * *"   # daily 10:00 UTC — re-enable after test run
   workflow_dispatch:         # manual trigger from Actions tab
 
 jobs:
