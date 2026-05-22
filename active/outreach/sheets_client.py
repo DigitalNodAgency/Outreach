@@ -30,13 +30,20 @@ SCOPES = [
 
 def _get_client() -> gspread.Client:
     creds_dict = json.loads(GOOGLE_SERVICE_ACCOUNT_JSON)
+    logger.info(f"[SHEETS] Auth as: {creds_dict.get('client_email', '???')}")
     creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     return gspread.authorize(creds)
 
 
 def _get_sheet(tab_name: str) -> gspread.Worksheet:
     client = _get_client()
-    spreadsheet = client.open_by_key(SPREADSHEET_ID)
+    try:
+        spreadsheet = client.open_by_key(SPREADSHEET_ID)
+    except PermissionError as e:
+        raise PermissionError(
+            f"403: service account has no access to sheet id={SPREADSHEET_ID!r}. "
+            f"Share the sheet with the client_email logged above as Editor."
+        ) from e
     try:
         return spreadsheet.worksheet(tab_name)
     except gspread.WorksheetNotFound:
