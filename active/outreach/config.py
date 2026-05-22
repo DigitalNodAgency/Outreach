@@ -27,9 +27,9 @@ GOOGLE_SERVICE_ACCOUNT_JSON = _require("GOOGLE_SERVICE_ACCOUNT_JSON")
 # ── Brevo SMTP ─────────────────────────────────────────────────────────────────
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp-relay.brevo.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = _require("SMTP_USER")
-SMTP_PASS = _require("SMTP_PASS")
-BREVO_API_KEY = _require("BREVO_API_KEY")
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 
 # ── Notifications ──────────────────────────────────────────────────────────────
 GMAIL_SENDER = _require("GMAIL_SENDER")
