@@ -147,8 +147,8 @@ Lessons log: [active/research/lessons.md](active/research/lessons.md)
 ## 10. Project State and Persistent Decisions
 
 - **Last milestone:** Initial restructure complete (v1 | 2026-05-17)
-- **Current focus:** Client onboarding — awaiting ICP parameters, credentials, template content
-- **Pending decisions:** ICP persona, industries, regions, daily cap, schedule times, template series
+- **Current focus:** Client onboarding — ICP received, awaiting PhantomBuster FB phantom ID and template content
+- **Pending decisions:** Schedule times, template series, PhantomBuster FB phantom ID
 - **Known issues:** None
 - **Locked choices:** No Apify Places, Serper discovery, SerpAPI, Apify Leads Finder (retired — ~3% email yield)
 
@@ -221,15 +221,15 @@ Vibe Prospecting MCP → Prospeo → Manual assist
 Apify Places, Serper discovery, SerpAPI, Apify Leads Finder.
 Root cause: return business listings without verified personal emails. Yield ~3%.
 
-### ICP Configuration (fill after onboarding)
+### ICP Configuration
 ```
-ICP_PERSONA     = [CLIENT_ICP_PERSONA]
-ICP_COMPANY_SIZE= [CLIENT_COMPANY_SIZE]
-ICP_INDUSTRIES  = [CLIENT_INDUSTRIES]
-ICP_REGIONS     = [CLIENT_REGIONS]
-ICP_DISQUALIFY  = [CLIENT_DISQUALIFY_CONDITIONS]
-DAILY_EMAIL_CAP = [CLIENT_DAILY_CAP]
-MAX_LEADS_PER_RUN = [CLIENT_MAX_LEADS_PER_RUN]
+ICP_PERSONA     = HVAC company owner,founder,CEO,director,Head of Marketing,CMO
+ICP_COMPANY_SIZE= 10-50,50-200
+ICP_INDUSTRIES  = HVAC,Heating Ventilation and Air Conditioning
+ICP_REGIONS     = Florida,USA
+ICP_DISQUALIFY  = Any company outside the HVAC industry or outside Florida USA
+DAILY_EMAIL_CAP = 300
+MAX_LEADS_PER_RUN = 100
 ```
 
 ### Outreach Sequence
