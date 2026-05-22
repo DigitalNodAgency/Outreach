@@ -66,9 +66,12 @@ def get_all_leads() -> list[dict]:
     """Return all lead rows as dicts. Skips header row."""
     ws = _get_sheet("Leads")
     existing = ws.row_values(1)
-    if not existing or existing[0] != LEADS_HEADERS[0]:
-        ws.insert_row(LEADS_HEADERS, index=1)
-        logger.info("[SHEETS] Headers written to Leads tab.")
+    if existing != LEADS_HEADERS:
+        if existing and existing[0].lower() == LEADS_HEADERS[0]:
+            ws.update("A1", [LEADS_HEADERS])  # overwrite partial/wrong header row
+        else:
+            ws.insert_row(LEADS_HEADERS, index=1)  # empty sheet or data in row 1
+        logger.info("[SHEETS] Headers corrected on Leads tab.")
         return []
     return ws.get_all_records(expected_headers=LEADS_HEADERS)
 
