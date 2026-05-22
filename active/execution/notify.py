@@ -59,9 +59,7 @@ def send_run_summary(
         f"Follow-ups staged:     {followup_staged}",
         "",
         "Enrichment results:",
-        f"  Prospeo enriched:    {enrichment_results.get('prospeo', 0)}",
-        f"  Apify enriched:      {enrichment_results.get('apify', 0)}",
-        f"  Serper enriched:     {enrichment_results.get('serper', 0)}",
+        f"  Prospeo enriched:        {enrichment_results.get('prospeo', 0)}",
         f"  Auto-deleted (no email): {enrichment_results.get('deleted', 0)}",
     ]
 
@@ -151,4 +149,24 @@ def alert_pipeline_error(stage: str, message: str) -> None:
     _send_via_gmail(
         subject=f"[Lead Manager] Error in {stage} — {now}",
         body=f"Stage: {stage}\nTime: {now}\n\nError:\n{message}",
+    )
+
+
+def alert_token_exhausted(source: str, details: str = "") -> None:
+    """Alert operator when an API source runs out of credits/quota."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    body_lines = [
+        f"Source: {source}",
+        f"Time:   {now}",
+        "",
+        "The API returned a credit/quota exhaustion error.",
+        "Pipeline continued but this source produced no leads.",
+        "",
+        "Action required: log in and recharge your credits, then re-run Phase 1.",
+    ]
+    if details:
+        body_lines += ["", f"Details: {details}"]
+    _send_via_gmail(
+        subject=f"[ALERT] Token Exhausted — {source} — {now}",
+        body="\n".join(body_lines),
     )

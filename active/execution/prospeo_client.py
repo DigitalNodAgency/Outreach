@@ -38,11 +38,26 @@ def _post(endpoint: str, payload: dict, retries: int = 3) -> Optional[dict]:
                 logger.warning(f"[PROSPEO] Rate limit hit. Retrying in {delay}s.")
                 time.sleep(delay)
                 continue
+            if resp.status_code == 402:
+                from notify import alert_token_exhausted
+                msg = f"HTTP 402 on {endpoint}: {resp.text[:200]}"
+                log_pipeline_error("prospeo", msg)
+                alert_token_exhausted("Prospeo", msg)
+                return None
             if resp.status_code in (401, 403):
                 log_pipeline_error("prospeo", f"Auth error {resp.status_code}: {resp.text}")
                 return None
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            # Some APIs return 200 with a credits-exhausted payload
+            err_msg = str(data.get("error", "") or data.get("message", "")).lower()
+            if any(k in err_msg for k in ("credit", "quota", "limit exceeded", "insufficient")):
+                from notify import alert_token_exhausted
+                detail = f"API message: {err_msg}"
+                log_pipeline_error("prospeo", detail)
+                alert_token_exhausted("Prospeo", detail)
+                return None
+            return data
         except requests.exceptions.Timeout:
             logger.warning(f"[PROSPEO] Timeout on {endpoint}, attempt {attempt}.")
             time.sleep(delay)
