@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parents[2] / ".env")
 
-_ROOT = Path(__file__).parents[2]
+_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _require(key: str) -> str:

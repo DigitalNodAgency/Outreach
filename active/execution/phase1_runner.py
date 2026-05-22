@@ -70,8 +70,8 @@ def main() -> int:
             total_dupes += prospeo_stats["dupes_skipped"]
             logger.info(f"[PHASE1] Prospeo: {prospeo_stats}")
         except Exception as e:
-            log_pipeline_error("prospeo_discovery", str(e))
-            logger.error(f"[PHASE1] Prospeo discovery error: {e}")
+            log_pipeline_error("prospeo_discovery", f"{type(e).__name__}: {e}")
+            logger.error(f"[PHASE1] Prospeo discovery error: {type(e).__name__}: {e}")
 
     # Step 3 — Email enrichment (only for leads with missing emails)
     try:
@@ -79,8 +79,8 @@ def main() -> int:
         enrichment_results = run_enrichment()
         logger.info(f"[PHASE1] Enrichment: {enrichment_results}")
     except Exception as e:
-        log_pipeline_error("enrichment", str(e))
-        logger.error(f"[PHASE1] Enrichment error (non-fatal): {e}")
+        log_pipeline_error("enrichment", f"{type(e).__name__}: {e}")
+        logger.error(f"[PHASE1] Enrichment error (non-fatal): {type(e).__name__}: {e}")
 
     # Step 4 — Follow-up staging (advance status/count, no emails sent)
     try:
@@ -89,8 +89,8 @@ def main() -> int:
         followup_staged = len(staged)
         logger.info(f"[PHASE1] Follow-up staged: {followup_staged}")
     except Exception as e:
-        log_pipeline_error("followup_staging", str(e))
-        logger.error(f"[PHASE1] Follow-up staging error (non-fatal): {e}")
+        log_pipeline_error("followup_staging", f"{type(e).__name__}: {e}")
+        logger.error(f"[PHASE1] Follow-up staging error (non-fatal): {type(e).__name__}: {e}")
 
     # Step 5 — Summary email
     errors = [e["message"] for e in read_pipeline_errors(limit=20)]
