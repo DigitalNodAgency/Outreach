@@ -1,0 +1,11 @@
+Closing the loop - {{company}}
+
+This is the last email I'll send, and I'll keep it short.
+
+I reached out twice about building a more consistent lead pipeline for {{company}}, the kind that keeps working through slow season without you chasing it. If the timing just isn't right, no hard feelings at all.
+
+That said, if this becomes relevant next quarter, it's worth a quick conversation before you start from scratch. Pipeline problems tend to cost more the longer they sit.
+
+Worth revisiting?
+
+{{sender_name}}

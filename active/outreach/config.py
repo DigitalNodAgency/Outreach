@@ -46,6 +46,7 @@ SMTP_HEALTH_FAIL_THRESHOLD = float(os.getenv("SMTP_HEALTH_FAIL_THRESHOLD", "0.5"
 
 # ── Landing page / booking ─────────────────────────────────────────────────────
 CALENDLY_URL = os.getenv("CALENDLY_URL", "")
+SENDER_NAME = os.getenv("SENDER_NAME", "")
 
 # ── Template directory ─────────────────────────────────────────────────────────
 TEMPLATES_DIR = os.getenv("TEMPLATES_DIR") or str(_ROOT / "active" / "outreach" / "templates")

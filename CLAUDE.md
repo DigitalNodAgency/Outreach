@@ -193,7 +193,8 @@ PHANTOMBUSTER_LI_PHANTOM_ID    PhantomBuster LinkedIn Message Sender phantom ID
 ```
 FOLLOWUP_DELAY_DAYS    Days between touches (default 4)
 MAX_FOLLOWUPS          Max touches per lead (default 3)
-GAMMA_URL              Client's landing page URL injected into templates
+CALENDLY_URL           Client's Calendly booking link injected into templates
+SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mirchandani)
 ```
 
 ---

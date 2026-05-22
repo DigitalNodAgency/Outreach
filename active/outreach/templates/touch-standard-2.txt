@@ -1,0 +1,13 @@
+Re: What slow season looks like for most Florida HVAC companies
+
+Following up on my last note. Rather than stay abstract, I'd rather show you how this actually works for HVAC businesses in Florida.
+
+We typically start by identifying the biggest gaps in your current lead flow, then build out what gets automated first. Most businesses see new enquiries within the first 30 days. The handoff is structured so {{company}} runs it independently after 90 days.
+
+If that's worth 15 minutes to explore, here's a link to book a quick call:
+
+{{calendly_url}}
+
+No pitch deck, no pressure.
+
+{{sender_name}}
