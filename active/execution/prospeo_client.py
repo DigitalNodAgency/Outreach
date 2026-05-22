@@ -44,6 +44,9 @@ def _post(endpoint: str, payload: dict, retries: int = 3) -> Optional[dict]:
                 log_pipeline_error("prospeo", msg)
                 alert_token_exhausted("Prospeo", msg)
                 return None
+            if resp.status_code == 400:
+                logger.error(f"[PROSPEO] 400 Bad Request on {endpoint}: {resp.text[:300]}")
+                return None  # not retryable
             if resp.status_code in (401, 403):
                 log_pipeline_error("prospeo", f"Auth error {resp.status_code}: {resp.text}")
                 return None

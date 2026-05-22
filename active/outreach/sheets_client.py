@@ -65,8 +65,12 @@ def ensure_headers(tab_name: str, headers: list[str]) -> None:
 def get_all_leads() -> list[dict]:
     """Return all lead rows as dicts. Skips header row."""
     ws = _get_sheet("Leads")
-    rows = ws.get_all_records(expected_headers=LEADS_HEADERS)
-    return rows
+    existing = ws.row_values(1)
+    if not existing or existing[0] != LEADS_HEADERS[0]:
+        ws.insert_row(LEADS_HEADERS, index=1)
+        logger.info("[SHEETS] Headers written to Leads tab.")
+        return []
+    return ws.get_all_records(expected_headers=LEADS_HEADERS)
 
 
 def get_existing_emails() -> set[str]:
