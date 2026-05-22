@@ -89,6 +89,20 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> b
 
     msg.attach(MIMEText(body, "plain"))
 
+    if not SMTP_USER or not SMTP_PASS:
+        err = f"SMTP_USER or SMTP_PASS is empty — set both GitHub Secrets."
+        logger.error(f"[SMTP] {err}")
+        _session.fail_count += 1
+        _session.errors.append(err)
+        _session.health_degraded = True
+        return False
+
+    user_display = (
+        f"{SMTP_USER[:4]}...@{SMTP_USER.split('@')[1]}" if "@" in SMTP_USER
+        else f"{SMTP_USER[:8]}... (no @ found — invalid for Brevo)"
+    )
+    logger.info(f"[SMTP] Authenticating as: {user_display}")
+
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
             server.ehlo()
