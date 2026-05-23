@@ -114,7 +114,7 @@ def append_leads_batch(leads: list[dict]) -> int:
             lead.get("followup_count", 0),
             lead.get("notes", ""),
             lead.get("facebook_url", ""),
-            lead.get("instagram_url", ""),
+            lead.get("linkedin_url", ""),
         ]
         rows.append(row)
 

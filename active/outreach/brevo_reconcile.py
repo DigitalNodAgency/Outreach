@@ -7,7 +7,7 @@ and deduplicates outreach_log. Idempotent — safe to run multiple times.
 import logging
 import os
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from config import BREVO_API_KEY
 
@@ -24,16 +24,22 @@ def _headers() -> dict:
     }
 
 
-def _get_brevo_sent_emails(limit: int = 500) -> list[dict]:
+def _get_brevo_sent_emails(limit: int = 500, days_back: int = 90) -> list[dict]:
     """
     Pull recent sent email history from Brevo API.
     Returns list of send records with email, subject, sentAt.
+    startDate is required by Brevo to avoid a 400 on accounts with send history.
     """
     url = f"{BREVO_BASE}/smtp/emails"
-    params = {"limit": limit, "sort": "desc"}
+    start_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    params = {"limit": limit, "sort": "desc", "startDate": start_date}
     try:
         resp = requests.get(url, headers=_headers(), params=params, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
+        if not resp.ok:
+            logger.error(
+                f"[BREVO RECONCILE] GET /smtp/emails returned {resp.status_code}: {resp.text[:500]}"
+            )
+            return []
         data = resp.json()
         return data.get("transactionalEmails", [])
     except Exception as e:
