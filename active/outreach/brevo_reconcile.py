@@ -31,8 +31,10 @@ def _get_brevo_sent_emails(limit: int = 500, days_back: int = 90) -> list[dict]:
     /smtp/statistics/events accepts just a startDate — returns event records.
     """
     url = f"{BREVO_BASE}/smtp/statistics/events"
-    start_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d")
-    params = {"limit": limit, "sort": "desc", "startDate": start_date, "event": "requests"}
+    now = datetime.now(timezone.utc)
+    start_date = (now - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    end_date = now.strftime("%Y-%m-%d")
+    params = {"limit": limit, "sort": "desc", "startDate": start_date, "endDate": end_date, "event": "requests"}
     try:
         resp = requests.get(url, headers=_headers(), params=params, timeout=REQUEST_TIMEOUT)
         if not resp.ok:
