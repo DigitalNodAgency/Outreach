@@ -41,13 +41,16 @@ def _source_tag() -> str:
 def _fetch_prospects(api_key: str, target: int) -> list[dict]:
     """Fetch prospect records via POST /v1/prospects with ICP filters."""
     body = {
+        "mode": "full",
         "page": 1,
         "page_size": min(target, 100),
-        "has_email": {"exists": True},
-        "company_region_country_code": {"values": ["us-fl"]},
-        "job_level": {"values": ["cxo", "partner", "director", "vp"]},
-        "company_size": {"values": ["1-10", "11-50", "51-200"]},
-        "naics_category": {"values": ["238220"]},  # HVAC & HVAC contractors
+        "filters": {
+            "has_email": {"value": True},
+            "company_region_country_code": {"values": ["us-fl"]},
+            "job_level": {"values": ["cxo", "partner", "director", "vp"]},
+            "company_size": {"values": ["1-10", "11-50", "51-200"]},
+            "naics_category": {"values": ["238220"]},  # HVAC contractors (NAICS 238220)
+        },
     }
     try:
         resp = requests.post(
