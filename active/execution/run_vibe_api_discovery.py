@@ -39,11 +39,27 @@ class _VibeMCPClient:
     def _headers(self) -> dict:
         h = {
             "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
             "Authorization": f"Bearer {self._key}",
         }
         if self._mcp_session_id:
             h["Mcp-Session-Id"] = self._mcp_session_id
         return h
+
+    @staticmethod
+    def _parse_sse(text: str) -> dict | None:
+        """Extract the last JSON-RPC result from an SSE stream."""
+        last = None
+        for line in text.splitlines():
+            if line.startswith("data: "):
+                data_str = line[6:].strip()
+                if data_str in ("[DONE]", ""):
+                    continue
+                try:
+                    last = json.loads(data_str)
+                except json.JSONDecodeError:
+                    pass
+        return last
 
     def _post(self, body: dict) -> dict | None:
         try:
@@ -56,6 +72,10 @@ class _VibeMCPClient:
             resp.raise_for_status()
             if not resp.content.strip():
                 return {}
+            content_type = resp.headers.get("Content-Type", "")
+            if "text/event-stream" in content_type:
+                logger.debug(f"[VIBE API] SSE response: {resp.text[:500]}")
+                return self._parse_sse(resp.text)
             return resp.json()
         except requests.exceptions.Timeout:
             logger.error("[VIBE API] Request timed out.")
