@@ -46,24 +46,58 @@ def _is_person_name(name: str) -> bool:
 def _normalize_record(raw: dict, source_tag: str) -> dict | None:
     """
     Normalize a raw Vibe CSV row to Sheets schema.
+    Handles both Vibe API export (prospect_*/business_* columns) and legacy CSV columns.
     Returns None and logs to failed_records if required fields missing.
     """
-    email = raw.get("email", "").strip()
+    # Email — Vibe API export uses prospect_email after enrich-prospects-contacts
+    email = (
+        raw.get("prospect_email", "")
+        or raw.get("prospect_business_email", "")
+        or raw.get("prospect_personal_email", "")
+        or raw.get("prospect_email_1", "")
+        or raw.get("email", "")
+        or raw.get("email_address", "")
+    ).strip()
     if not email or not _validate_email(email):
         log_failed_record(raw, reason="missing_or_invalid_email")
         return None
 
-    name = raw.get("name", raw.get("full_name", "")).strip()
-    company = raw.get("company", raw.get("company_name", "")).strip()
-    region = raw.get("region", raw.get("country", raw.get("location", ""))).strip().upper()
+    # Name — Vibe API uses prospect_full_name or first+last
+    name = (
+        raw.get("prospect_full_name", "")
+        or raw.get("name", "")
+        or raw.get("full_name", "")
+        or f"{raw.get('prospect_first_name', '')} {raw.get('prospect_last_name', '')}".strip()
+    ).strip()
 
+    # Company — Vibe API uses prospect_company_name or business_name
+    company = (
+        raw.get("prospect_company_name", "")
+        or raw.get("business_name", "")
+        or raw.get("company", "")
+        or raw.get("company_name", "")
+    ).strip()
     if not company:
         log_failed_record(raw, reason="missing_company")
         return None
 
-    # Social URLs — map from Vibe export columns if present, otherwise empty
+    # Region — Vibe API uses prospect_region_name or business_region
+    region = (
+        raw.get("prospect_region_name", "")
+        or raw.get("business_region", "")
+        or raw.get("region", "")
+        or raw.get("country", "")
+        or raw.get("location", "")
+        or raw.get("prospect_country_name", "")
+    ).strip().upper()
+
+    # Social URLs — Vibe API uses prospect_linkedin; legacy uses linkedin_url
     facebook_url = raw.get("facebook_url", raw.get("facebook", "")).strip()
-    linkedin_url = raw.get("linkedin_url", raw.get("linkedin", "")).strip()
+    linkedin_url = (
+        raw.get("prospect_linkedin", "")
+        or raw.get("linkedin_url", "")
+        or raw.get("linkedin", "")
+    ).strip()
 
     return {
         "name": name,
