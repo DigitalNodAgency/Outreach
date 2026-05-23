@@ -245,18 +245,44 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
         return stats
 
     logger.info(f"[VIBE API] export-to-csv OK. row_count={row_count}")
+    logger.info(f"[VIBE API] download_url: {download_url}")
+    logger.debug(f"[VIBE API] Full export_result: {export_result}")
 
-    # Step 4: download CSV (auth headers required — unauthenticated returns HTML)
-    try:
-        csv_resp = requests.get(
-            download_url,
-            headers={"Authorization": f"Bearer {api_key}", "X-API-Key": api_key},
-            timeout=120,
-        )
-        csv_resp.raise_for_status()
-    except Exception as e:
-        logger.error(f"[VIBE API] CSV download failed: {e}")
-        log_pipeline_error(SOURCE_NAME, f"CSV download failed: {e}")
+    # Step 4: download CSV
+    # Try plain GET first — pre-signed URLs (S3/GCS) reject or misbehave with auth headers.
+    # Fall back to auth headers if plain GET returns HTML.
+    csv_resp = None
+    for attempt, req_headers in enumerate([
+        {},
+        {"Authorization": f"Bearer {api_key}", "X-API-Key": api_key},
+    ]):
+        try:
+            csv_resp = requests.get(download_url, headers=req_headers, timeout=120)
+        except Exception as e:
+            logger.error(f"[VIBE API] CSV download request error (attempt {attempt + 1}): {e}")
+            log_pipeline_error(SOURCE_NAME, f"CSV download failed: {e}")
+            record_source_run(SOURCE_NAME, 0)
+            return stats
+
+        content_type = csv_resp.headers.get("Content-Type", "")
+        logger.info(f"[VIBE API] Download attempt {attempt + 1}: status={csv_resp.status_code} content-type={content_type}")
+
+        if csv_resp.ok and "text/html" not in content_type:
+            break
+
+        if "text/html" in content_type:
+            logger.error(
+                f"[VIBE API] Download returned HTML (attempt {attempt + 1}). "
+                f"URL={download_url} | First 300 chars: {csv_resp.text[:300]}"
+            )
+            if attempt == 1:
+                log_pipeline_error(SOURCE_NAME, f"CSV download returned HTML on both attempts. URL={download_url}")
+                record_source_run(SOURCE_NAME, 0)
+                return stats
+
+    if not csv_resp.ok:
+        logger.error(f"[VIBE API] CSV download HTTP {csv_resp.status_code}: {csv_resp.text[:300]}")
+        log_pipeline_error(SOURCE_NAME, f"CSV download HTTP {csv_resp.status_code}")
         record_source_run(SOURCE_NAME, 0)
         return stats
 
