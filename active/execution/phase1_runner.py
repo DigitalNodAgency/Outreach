@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "outreach"))
 
-from config import PIPELINE_PAUSED_FLAG, FOLLOWUP_DELAY_DAYS, VIBE_EXPORT_CSV
+from config import PIPELINE_PAUSED_FLAG, FOLLOWUP_DELAY_DAYS, VIBE_EXPORT_CSV, MAX_LEADS_PER_RUN
 from pipeline_metrics import read_pipeline_errors, log_pipeline_error
 from notify import send_run_summary
 
@@ -47,18 +47,32 @@ def main() -> int:
 
     # Step 1 — Vibe Prospecting ingestion (primary source)
     vibe_stats = {"new_leads": 0, "dupes_skipped": 0, "failed": 0}
-    if os.path.exists(VIBE_EXPORT_CSV):
+    vibe_api_key = os.getenv("VIBE_PROSPECTING_API_KEY", "").strip()
+
+    if vibe_api_key:
+        # GHA path: call Vibe MCP HTTP API directly
+        try:
+            from run_vibe_api_discovery import run_vibe_api_discovery
+            vibe_stats = run_vibe_api_discovery(target=MAX_LEADS_PER_RUN)
+            total_new += vibe_stats["new_leads"]
+            total_dupes += vibe_stats["dupes_skipped"]
+            logger.info(f"[PHASE1] Vibe API: {vibe_stats}")
+        except Exception as e:
+            log_pipeline_error("vibe_api", f"{type(e).__name__}: {e}")
+            logger.error(f"[PHASE1] Vibe API error: {type(e).__name__}: {e}")
+    elif os.path.exists(VIBE_EXPORT_CSV):
+        # Legacy path: CSV exported from a Claude Code MCP session
         try:
             from ingest_vibe_export import run_vibe_ingest
             vibe_stats = run_vibe_ingest()
             total_new += vibe_stats["new_leads"]
             total_dupes += vibe_stats["dupes_skipped"]
-            logger.info(f"[PHASE1] Vibe: {vibe_stats}")
+            logger.info(f"[PHASE1] Vibe CSV: {vibe_stats}")
         except Exception as e:
             log_pipeline_error("vibe_ingest", str(e))
             logger.error(f"[PHASE1] Vibe ingest error: {e}")
     else:
-        logger.info(f"[PHASE1] No Vibe export CSV found at {VIBE_EXPORT_CSV}. Skipping Vibe.")
+        logger.info("[PHASE1] No VIBE_PROSPECTING_API_KEY and no CSV. Skipping Vibe.")
 
     # Step 2 — Prospeo fallback (if Vibe returned < VIBE_MIN_RESULTS or no CSV)
     if vibe_stats["new_leads"] < VIBE_MIN_RESULTS:
