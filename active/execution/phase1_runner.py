@@ -53,7 +53,7 @@ def main() -> int:
         # GHA path: call Vibe MCP HTTP API directly
         try:
             from run_vibe_api_discovery import run_vibe_api_discovery
-            vibe_stats = run_vibe_api_discovery(target=1)
+            vibe_stats = run_vibe_api_discovery(target=MAX_LEADS_PER_RUN)
             total_new += vibe_stats["new_leads"]
             total_dupes += vibe_stats["dupes_skipped"]
             logger.info(f"[PHASE1] Vibe API: {vibe_stats}")

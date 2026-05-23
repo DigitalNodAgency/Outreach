@@ -5,6 +5,7 @@ PhantomBuster phantom, polls for completion, and logs results.
 """
 
 import logging
+import os
 from datetime import datetime, timezone
 
 from config import (
@@ -12,6 +13,8 @@ from config import (
     PHANTOMBUSTER_FB_PHANTOM_ID,
     PHANTOMBUSTER_LI_PHANTOM_ID,
     DRY_RUN,
+    TEMPLATES_DIR,
+    SENDER_NAME,
 )
 from phantombuster_client import launch_phantom, wait_for_completion, get_phantom_output
 from sheets_client import get_leads_for_social_outreach, append_social_log
@@ -29,6 +32,24 @@ def _phantom_id_for(platform: str) -> str:
 
 def _url_field_for(platform: str) -> str:
     return "facebook_url" if platform == "facebook" else "linkedin_url"
+
+
+def _load_social_template(platform: str) -> str:
+    path = os.path.join(TEMPLATES_DIR, f"social-{platform}-1.txt")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Social template not found: {path}")
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read().strip()
+
+
+def _render_social_message(template: str, name: str, company: str) -> str:
+    first_name = name.split()[0] if name.strip() else "there"
+    return (
+        template
+        .replace("{{name}}", first_name)
+        .replace("{{company}}", company)
+        .replace("{{sender_name}}", SENDER_NAME)
+    )
 
 
 def run_social_outreach(platform: str) -> dict:
@@ -53,19 +74,27 @@ def run_social_outreach(platform: str) -> dict:
     stats["targeted"] = len(leads)
     logger.info(f"[SOCIAL] {platform} — {len(leads)} leads targeted.")
 
-    input_data = [
-        {
+    try:
+        template = _load_social_template(platform)
+    except FileNotFoundError as e:
+        logger.error(f"[SOCIAL] {e}")
+        return stats
+
+    input_data = []
+    for lead in leads:
+        name = lead.get("name", "").strip()
+        company = lead.get("company", "").strip()
+        input_data.append({
             "profileUrl": lead.get(url_field, ""),
-            "name": lead.get("name", ""),
-            "company": lead.get("company", ""),
-        }
-        for lead in leads
-    ]
+            "name": name,
+            "company": company,
+            "message": _render_social_message(template, name, company),
+        })
 
     if DRY_RUN:
         logger.info(f"[SOCIAL] DRY RUN — would launch {platform} phantom with {len(input_data)} leads:")
         for item in input_data:
-            logger.info(f"  {item}")
+            logger.info(f"  profileUrl={item['profileUrl']} | message={item['message'][:80]}...")
         stats["launched"] = False
         return stats
 

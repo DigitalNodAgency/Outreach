@@ -109,6 +109,7 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> b
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
             server.ehlo()
             server.starttls()
+            server.ehlo()  # re-announce after TLS upgrade
             server.login(SMTP_USER, SMTP_PASS)
             server.sendmail(SMTP_USER, [to_email], msg.as_string())
 

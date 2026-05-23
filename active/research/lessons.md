@@ -58,7 +58,26 @@ Rules must be specific. "Be more careful" is not a rule. "Never do X without che
 ## Learned Rules
 > Claude Code adds entries here as the project runs. Start empty, grows with the project.
 
-[No lessons recorded yet]
+**[2026-05-23] Vibe MCP `export-to-csv` is not a programmable download endpoint**
+Returns `app.vibeprospecting.ai/lists?dataset_id=...` — a React SPA portal URL. No auth header
+combination fixes it. Use `api.explorium.ai/v1` REST API directly for any programmatic access.
+Rule: Never call Vibe MCP export-to-csv expecting a file. Use REST API only.
+
+**[2026-05-23] Explorium REST API request format**
+`mode: "full"` is required at root level. All filter params must be nested under a `"filters"` key.
+`has_email` filter uses `{"value": True}`, not `{"exists": True}`.
+422 "field required: mode" = missing root `mode` field.
+Rule: Always include `mode:"full"` and `"filters":{}` wrapper before adding any filter params.
+
+**[2026-05-23] Credit conservation during API debugging**
+Set `target=1` for every diagnostic run. Revert to `target=MAX_LEADS_PER_RUN` only after
+confirming a working lead is written to Sheets. Never test filter changes at full volume.
+Rule: First working run at target=1, then scale.
+
+**[2026-05-23] Prospeo `/search-person` is enrichment-only, not discovery**
+Requires specific identifiers (name + company domain), not ICP-style filter params.
+Sending ICP filters (seniority, industry, location) to it returns 400 "Field required".
+Rule: Never use Prospeo for discovery. It is T0 enrichment only.
 
 ---
 

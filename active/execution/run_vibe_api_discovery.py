@@ -45,7 +45,6 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
         "page": 1,
         "page_size": min(target, 100),
         "filters": {
-            "has_email": {"value": True},
             "company_region_country_code": {"values": ["us-fl"]},
             "job_level": {"values": ["cxo", "partner", "director", "vp"]},
             "company_size": {"values": ["1-10", "11-50", "51-200"]},
@@ -69,7 +68,8 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
             f"(total_results={data.get('total_results', '?')})"
         )
         if prospects:
-            logger.debug(f"[VIBE API] First prospect sample: {dict(list(prospects[0].items())[:6])}")
+            logger.debug(f"[VIBE API] First prospect fields: {list(prospects[0].keys())}")
+            logger.debug(f"[VIBE API] First prospect sample: {prospects[0]}")
         return prospects
     except Exception as e:
         logger.error(f"[VIBE API] fetch_prospects error: {e}")
@@ -107,7 +107,7 @@ def _enrich_email(api_key: str, prospect_id: str) -> str:
 
 def _normalize_prospect(prospect: dict, email: str, source_tag: str) -> dict | None:
     """Normalize a REST API prospect object to Sheets schema."""
-    if not email or not _validate_email(email):
+    if email and not _validate_email(email):
         return None
 
     company = (

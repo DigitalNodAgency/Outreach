@@ -1,0 +1,3 @@
+Hi {{name}}, I help HVAC businesses in Florida build demand pipelines that hold through the slow season — not just summer peak. A few companies nearby have seen new enquiries in the first 30 days. Worth a quick connect?
+
+— {{sender_name}}
