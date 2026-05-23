@@ -246,9 +246,13 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
 
     logger.info(f"[VIBE API] export-to-csv OK. row_count={row_count}")
 
-    # Step 4: download CSV
+    # Step 4: download CSV (auth headers required — unauthenticated returns HTML)
     try:
-        csv_resp = requests.get(download_url, timeout=120)
+        csv_resp = requests.get(
+            download_url,
+            headers={"Authorization": f"Bearer {api_key}", "X-API-Key": api_key},
+            timeout=120,
+        )
         csv_resp.raise_for_status()
     except Exception as e:
         logger.error(f"[VIBE API] CSV download failed: {e}")
