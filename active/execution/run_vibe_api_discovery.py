@@ -41,6 +41,7 @@ class _VibeMCPClient:
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
             "Authorization": f"Bearer {self._key}",
+            "X-API-Key": self._key,
         }
         if self._mcp_session_id:
             h["Mcp-Session-Id"] = self._mcp_session_id
@@ -66,19 +67,26 @@ class _VibeMCPClient:
             resp = requests.post(MCP_URL, json=body, headers=self._headers(), timeout=REQUEST_TIMEOUT)
             if "Mcp-Session-Id" in resp.headers:
                 self._mcp_session_id = resp.headers["Mcp-Session-Id"]
-            if resp.status_code in (401, 403):
-                logger.error(f"[VIBE API] Auth error {resp.status_code}: {resp.text[:300]}")
-                return None
-            resp.raise_for_status()
+            if not resp.ok:
+                logger.error(
+                    f"[VIBE API] HTTP {resp.status_code} {resp.reason} | "
+                    f"Content-Type: {resp.headers.get('Content-Type', '?')} | "
+                    f"Body: {resp.text[:600]}"
+                )
+                if resp.status_code in (401, 403):
+                    return None
+                resp.raise_for_status()
             if not resp.content.strip():
                 return {}
             content_type = resp.headers.get("Content-Type", "")
             if "text/event-stream" in content_type:
-                logger.debug(f"[VIBE API] SSE response: {resp.text[:500]}")
+                logger.debug(f"[VIBE API] SSE body: {resp.text[:500]}")
                 return self._parse_sse(resp.text)
             return resp.json()
         except requests.exceptions.Timeout:
             logger.error("[VIBE API] Request timed out.")
+            return None
+        except requests.exceptions.HTTPError:
             return None
         except Exception as e:
             logger.error(f"[VIBE API] Request error: {e}")
