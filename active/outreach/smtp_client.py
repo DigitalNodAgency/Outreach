@@ -101,7 +101,9 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> b
         f"{SMTP_USER[:4]}...@{SMTP_USER.split('@')[1]}" if "@" in SMTP_USER
         else f"{SMTP_USER[:8]}... (no @ found — invalid for Brevo)"
     )
-    logger.info(f"[SMTP] Authenticating as: {user_display}")
+    pass_len = len(SMTP_PASS)
+    pass_prefix = SMTP_PASS[:8] if pass_len >= 8 else SMTP_PASS
+    logger.info(f"[SMTP] Authenticating as: {user_display} | key_len={pass_len} key_prefix={pass_prefix}")
 
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
