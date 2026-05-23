@@ -26,24 +26,24 @@ def _headers() -> dict:
 
 def _get_brevo_sent_emails(limit: int = 500, days_back: int = 90) -> list[dict]:
     """
-    Pull recent sent email history from Brevo API.
-    Returns list of send records with email, subject, sentAt.
-    startDate is required by Brevo to avoid a 400 on accounts with send history.
+    Pull recent sent email activity from Brevo /smtp/statistics/events.
+    /smtp/emails requires email/messageId/templateId filter (unusable for bulk fetch).
+    /smtp/statistics/events accepts just a startDate — returns event records.
     """
-    url = f"{BREVO_BASE}/smtp/emails"
+    url = f"{BREVO_BASE}/smtp/statistics/events"
     start_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%Y-%m-%d")
-    params = {"limit": limit, "sort": "desc", "startDate": start_date}
+    params = {"limit": limit, "sort": "desc", "startDate": start_date, "event": "requests"}
     try:
         resp = requests.get(url, headers=_headers(), params=params, timeout=REQUEST_TIMEOUT)
         if not resp.ok:
             logger.error(
-                f"[BREVO RECONCILE] GET /smtp/emails returned {resp.status_code}: {resp.text[:500]}"
+                f"[BREVO RECONCILE] GET /smtp/statistics/events returned {resp.status_code}: {resp.text[:500]}"
             )
             return []
         data = resp.json()
-        return data.get("transactionalEmails", [])
+        return data.get("events", [])
     except Exception as e:
-        logger.error(f"[BREVO RECONCILE] Failed to fetch Brevo emails: {e}")
+        logger.error(f"[BREVO RECONCILE] Failed to fetch Brevo email events: {e}")
         return []
 
 
