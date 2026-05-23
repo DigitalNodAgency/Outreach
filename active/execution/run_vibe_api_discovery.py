@@ -260,6 +260,9 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
     source_tag = _source_tag()
     raw_rows = list(csv.DictReader(io.StringIO(csv_resp.text)))
     logger.info(f"[VIBE API] Downloaded {len(raw_rows)} CSV rows.")
+    if raw_rows:
+        logger.info(f"[VIBE API] CSV columns: {list(raw_rows[0].keys())}")
+        logger.info(f"[VIBE API] First row sample: {dict(list(raw_rows[0].items())[:8])}")
 
     normalized = []
     failed = 0
