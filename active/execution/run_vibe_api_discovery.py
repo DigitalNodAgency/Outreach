@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "outreach"))
 from config import STATUS_NEW
 from pipeline_metrics import log_pipeline_error, record_source_run, record_run_stats
 from ingest_vibe_export import _validate_email, _deduplicate
+from notify import alert_token_exhausted
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,47 @@ BASE_URL = "https://api.explorium.ai/v1"
 REQUEST_TIMEOUT = 60
 SOURCE_NAME = "vibe_api"
 ENRICH_DELAY = 0.3  # seconds between per-prospect enrich calls
+
+
+_CREDIT_KEYWORDS = ("credit", "quota", "limit exceeded", "insufficient", "out of")
+
+
+def _is_credit_exhausted(resp) -> bool:
+    try:
+        body = resp.text.lower()
+        return any(kw in body for kw in _CREDIT_KEYWORDS)
+    except Exception:
+        return False
+
+
+def _compute_warmth_score(prospect: dict, has_email: bool) -> int:
+    """
+    Score 0–10 based on ICP fit signals available from Explorium response.
+    Seniority (5) + company size (2) + linkedin url (2) + email (1).
+    """
+    score = 0
+
+    job_level = prospect.get("job_level", "").lower()
+    if job_level in ("cxo", "partner"):
+        score += 5
+    elif job_level in ("director", "vp"):
+        score += 3
+    else:
+        score += 1
+
+    company_size = prospect.get("company_size", "")
+    if company_size in ("11-50", "51-200"):
+        score += 2
+    elif company_size == "1-10":
+        score += 1
+
+    if prospect.get("linkedin_url", "").strip():
+        score += 2
+
+    if has_email:
+        score += 1
+
+    return min(score, 10)
 
 
 def _headers(api_key: str) -> dict:
@@ -59,6 +101,8 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
             timeout=REQUEST_TIMEOUT,
         )
         if not resp.ok:
+            if resp.status_code == 402 or _is_credit_exhausted(resp):
+                alert_token_exhausted("Explorium", resp.text[:300])
             logger.error(f"[VIBE API] fetch_prospects {resp.status_code}: {resp.text[:500]}")
             return []
         data = resp.json()
@@ -90,6 +134,8 @@ def _enrich_email(api_key: str, prospect_id: str) -> str:
             timeout=REQUEST_TIMEOUT,
         )
         if not resp.ok:
+            if resp.status_code == 402 or _is_credit_exhausted(resp):
+                alert_token_exhausted("Explorium", resp.text[:300])
             logger.debug(f"[VIBE API] enrich_email {resp.status_code} for {prospect_id[:12]}: {resp.text[:200]}")
             return ""
         data = resp.json().get("data", {})
@@ -132,7 +178,7 @@ def _normalize_prospect(prospect: dict, email: str, source_tag: str) -> dict | N
         "email": email.lower(),
         "company": company,
         "region": region,
-        "warmth_score": "",
+        "warmth_score": _compute_warmth_score(prospect, bool(email)),
         "status": STATUS_NEW,
         "last_contacted": "",
         "followup_count": 0,

@@ -205,6 +205,7 @@ SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mircha
 - [v1 | 2026-05-17 | Initial project restructure to spec layout. Flat-root → active/ hierarchy. Absolute file paths in config. Log files routed to logs/.]
 - [v2 | 2026-05-21 | Social outreach added: PhantomBuster Facebook + LinkedIn via social-outreach.yml (manual dispatch). Leads sheet col K = linkedin_url. Instagram replaced by LinkedIn throughout.]
 - [v3 | 2026-05-23 | Switched Vibe discovery from MCP export-to-csv to direct Explorium REST API (api.explorium.ai/v1). Root cause: export-to-csv returns a portal URL (app.vibeprospecting.ai/lists), not a programmable download endpoint. REST API requires mode:"full" at root and all filters nested under "filters" key. Removed has_email filter to allow name-only leads through to the enrichment tier (Prospeo T0).]
+- [v4 | 2026-05-24 | Phase 2 SMTP fix: SMTP_FROM was silently falling back to SMTP_USER (Brevo relay credential) causing Brevo to reject sends. Fixed smtp_client.py to use SMTP_FROM exclusively with hard validation. Workflow fix: SMTP_FROM missing from phase2-outreach.yml env block. Warmth score formula added (seniority+size+linkedin+email, 0-10). Explorium credit alert added. Template: removed EY/Waseda line from touch-standard-1.txt.]
 
 ---
 
