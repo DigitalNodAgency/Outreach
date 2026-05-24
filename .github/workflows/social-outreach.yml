@@ -6,7 +6,7 @@ on:
       platform:
         description: "Platform to target (facebook / linkedin / both)"
         required: true
-        default: "both"
+        default: "linkedin"
         type: choice
         options:
           - facebook
