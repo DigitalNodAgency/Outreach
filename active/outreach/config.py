@@ -29,6 +29,7 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp-relay.brevo.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "").strip()
 SMTP_PASS = os.getenv("SMTP_PASS", "").strip()
+SMTP_FROM = os.getenv("SMTP_FROM", "").strip()
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 
 # ── Notifications ──────────────────────────────────────────────────────────────

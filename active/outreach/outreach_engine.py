@@ -106,7 +106,7 @@ def run_initial_outreach(outreach_log_cache: set) -> dict:
             continue
 
         subject, body = _render_template(subject_tpl, body_tpl, name, company)
-        success = send_email(to_email=email, subject=subject, body=body)
+        success = send_email(to_email=email, subject=subject, body=body, from_name=SENDER_NAME)
 
         if success:
             now = _now_iso()
@@ -206,7 +206,7 @@ def run_followup_outreach(outreach_log_cache: set) -> dict:
             continue
 
         subject, body = _render_template(subject_tpl, body_tpl, name, company)
-        success = send_email(to_email=email, subject=subject, body=body)
+        success = send_email(to_email=email, subject=subject, body=body, from_name=SENDER_NAME)
 
         new_count = followup_count + 1
         new_status = STATUS_CLOSED if new_count >= MAX_FOLLOWUPS else STATUS_FOLLOWUP_SENT

@@ -11,7 +11,7 @@ from email.mime.text import MIMEText
 from dataclasses import dataclass, field
 
 from config import (
-    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
+    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM,
     DAILY_EMAIL_CAP, SEND_DELAY_SECONDS,
     SMTP_HEALTH_MIN_SENDS, SMTP_HEALTH_FAIL_THRESHOLD,
 )
@@ -84,13 +84,13 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> b
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = f"{from_name} <{SMTP_USER}>" if from_name else SMTP_USER
+    msg["From"] = f"{from_name} <{SMTP_FROM}>" if from_name else SMTP_FROM
     msg["To"] = to_email
 
     msg.attach(MIMEText(body, "plain"))
 
-    if not SMTP_USER or not SMTP_PASS:
-        err = f"SMTP_USER or SMTP_PASS is empty — set both GitHub Secrets."
+    if not SMTP_USER or not SMTP_PASS or not SMTP_FROM:
+        err = f"SMTP_USER, SMTP_PASS, or SMTP_FROM is empty — set all three GitHub Secrets."
         logger.error(f"[SMTP] {err}")
         _session.fail_count += 1
         _session.errors.append(err)
@@ -111,7 +111,7 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> b
             server.starttls()
             server.ehlo()  # re-announce after TLS upgrade
             server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_USER, [to_email], msg.as_string())
+            server.sendmail(SMTP_FROM, [to_email], msg.as_string())
 
         _session.sends_today += 1
         _session.success_count += 1
