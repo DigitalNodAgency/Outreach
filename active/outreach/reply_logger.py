@@ -6,6 +6,7 @@ Logs matches to Outreach Reply Log sheet and updates lead status to replied.
 """
 
 import email
+import email.message
 import imaplib
 import logging
 import os
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 IMAP_HOST = os.getenv("IMAP_HOST", "imap.gmail.com")
 IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
-IMAP_USER = os.getenv("SMTP_USER", "")
+IMAP_USER = os.getenv("IMAP_USER", os.getenv("GMAIL_SENDER", ""))
 IMAP_PASS = os.getenv("IMAP_PASS", os.getenv("SMTP_PASS", ""))
 POLL_FOLDER = os.getenv("IMAP_FOLDER", "INBOX")
 POLL_DAYS_BACK = int(os.getenv("REPLY_POLL_DAYS_BACK", "3"))
