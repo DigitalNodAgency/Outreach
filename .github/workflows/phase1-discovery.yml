@@ -1,8 +1,8 @@
 name: phase1-discovery
 
 on:
-  # schedule:
-  #   - cron: "0 7 * * *"   # daily 07:00 UTC (3h before Phase 2) — re-enable after test run
+  schedule:
+    - cron: "0 7 * * 1,4"   # Monday + Thursday 07:00 UTC (3h before Phase 2)
   workflow_dispatch:        # manual trigger from Actions tab
 
 jobs:

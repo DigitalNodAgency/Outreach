@@ -39,7 +39,7 @@ NOTIFY_EMAIL = _require("NOTIFY_EMAIL")
 
 # ── Outreach limits ────────────────────────────────────────────────────────────
 DAILY_EMAIL_CAP = int(os.getenv("DAILY_EMAIL_CAP", "300"))
-FOLLOWUP_DELAY_DAYS = int(os.getenv("FOLLOWUP_DELAY_DAYS", "4"))
+FOLLOWUP_DELAY_DAYS = int(os.getenv("FOLLOWUP_DELAY_DAYS", "3"))
 MAX_FOLLOWUPS = int(os.getenv("MAX_FOLLOWUPS", "3"))
 SEND_DELAY_SECONDS = float(os.getenv("SEND_DELAY_SECONDS", "5"))
 SMTP_HEALTH_MIN_SENDS = int(os.getenv("SMTP_HEALTH_MIN_SENDS", "5"))
