@@ -340,18 +340,35 @@ def get_all_lead_emails_from_log() -> set[str]:
 
 # ── Social outreach ────────────────────────────────────────────────────────────
 
+def get_social_log_emails(platform: str) -> set[str]:
+    """Return emails already messaged via this platform (status=sent). Used to prevent re-sends."""
+    ws = _get_sheet("social_log")
+    rows = ws.get_all_values()
+    if not rows or len(rows) < 2:
+        return set()
+    # Cols: lead_email(0), lead_name(1), platform(2), profile_url(3), sent_date(4), status(5), notes(6)
+    return {
+        row[0].lower()
+        for row in rows[1:]
+        if len(row) >= 6
+        and row[2].lower() == platform.lower()
+        and row[5].lower() == "sent"
+    }
+
+
 def get_leads_for_social_outreach(platform: str) -> list[dict]:
     """
-    Return leads that have a profile URL for the given platform and are not closed/replied.
-    platform: 'facebook' or 'linkedin'
+    Return leads that have a profile URL for the given platform, are not closed/replied,
+    and have not already been messaged on this platform.
     """
     col = "facebook_url" if platform == "facebook" else "linkedin_url"
     excluded = {"replied", "closed"}
-    all_leads = get_all_leads()
+    already_messaged = get_social_log_emails(platform)
     return [
-        r for r in all_leads
+        r for r in get_all_leads()
         if r.get(col, "").strip()
         and r.get("status", "").lower() not in excluded
+        and r.get("email", "").lower() not in already_messaged
     ]
 
 

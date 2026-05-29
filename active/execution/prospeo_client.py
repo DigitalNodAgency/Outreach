@@ -130,6 +130,12 @@ def discover_with_prospeo(region: str, target: int = 25) -> list[dict]:
             "last_contacted": "",
             "followup_count": 0,
             "notes": f"source:{tag}",
+            "facebook_url": "",
+            "linkedin_url": (
+                item.get("linkedin_url", "")
+                or item.get("linkedin", "")
+                or item.get("profile_url", "")
+            ).strip(),
         })
 
     logger.info(f"[PROSPEO] Discovered {len(normalized)} leads for region: {region}")

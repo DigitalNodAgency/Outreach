@@ -183,7 +183,7 @@ def _normalize_prospect(prospect: dict, email: str, source_tag: str) -> dict | N
         "last_contacted": "",
         "followup_count": 0,
         "notes": f"source:{source_tag}",
-        "facebook_url": "",
+        "facebook_url": prospect.get("facebook_url", prospect.get("facebook", "")).strip(),
         "linkedin_url": prospect.get("linkedin_url", "").strip(),
     }
 
