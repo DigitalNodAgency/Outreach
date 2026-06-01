@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 from config import DRY_RUN, PHANTOMBUSTER_API_KEY
 from social_engine import run_social_outreach
-from notify import alert_pipeline_error
+from notify import send_social_summary
 
 
 def main() -> int:
@@ -40,23 +40,14 @@ def main() -> int:
         stats = run_social_outreach(touch)
         all_stats.append(stats)
 
-    total_targeted = sum(s["targeted"] for s in all_stats)
-    total_failed = sum(s["failed"] for s in all_stats)
-
-    summary_lines = [f"LinkedIn social outreach complete (dry_run={DRY_RUN})."]
     for s in all_stats:
-        summary_lines.append(
+        logger.info(
             f"  Touch {s['touch_number']}: targeted={s['targeted']}, failed={s['failed']}, "
             f"launched={s.get('launched')}, succeeded={s.get('succeeded')}"
         )
-    summary = "\n".join(summary_lines)
-    logger.info(summary)
 
     try:
-        alert_pipeline_error(
-            stage="social-outreach (linkedin)",
-            message=summary,
-        )
+        send_social_summary(all_stats, dry_run=DRY_RUN)
     except Exception as e:
         logger.warning(f"[SOCIAL] Failed to send summary email: {e}")
 

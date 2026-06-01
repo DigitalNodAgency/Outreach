@@ -34,6 +34,13 @@ def _load_template(touch_number: int) -> str:
         return f.read().strip()
 
 
+def _normalize_linkedin_url(url: str) -> str:
+    url = url.strip()
+    if url and not url.startswith("http"):
+        url = "https://" + url
+    return url
+
+
 def _render_message(template: str, name: str, sender_name: str) -> str:
     first_name = name.split()[0] if name.strip() else "there"
     return (
@@ -79,7 +86,7 @@ def run_social_outreach(touch_number: int) -> dict:
     for lead in leads:
         name = lead.get("name", "").strip()
         input_data.append({
-            "profileUrl": lead.get("linkedin_url", ""),
+            "profileUrl": _normalize_linkedin_url(lead.get("linkedin_url", "")),
             "name": name,
             "message": _render_message(template, name, SENDER_NAME),
         })
