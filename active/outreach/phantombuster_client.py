@@ -35,7 +35,9 @@ def launch_phantom(api_key: str, phantom_id: str, input_data: list[dict], sessio
     }
     try:
         resp = requests.post(url, json=payload, headers=_headers(api_key), timeout=30)
-        resp.raise_for_status()
+        if not resp.ok:
+            logger.error(f"[PB] Failed to launch phantom {phantom_id}: {resp.status_code} — {resp.text}")
+            return None
         container_id = resp.json().get("containerId")
         logger.info(f"[PB] Launched phantom {phantom_id} — container: {container_id}")
         return container_id
