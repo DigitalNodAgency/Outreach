@@ -1,6 +1,7 @@
 """
 social_main.py — Entry point for the social-outreach GitHub Actions workflow.
-Runs LinkedIn touches 1, 2, and 3 in sequence via PhantomBuster.
+Runs LinkedIn Touch 1 (connection request) via PhantomBuster.
+Touches 2 and 3 are handled natively by PhantomBuster's built-in follow-up system.
 """
 
 import logging
@@ -36,9 +37,8 @@ def main() -> int:
         return 1
 
     all_stats = []
-    for touch in [1, 2, 3]:
-        stats = run_social_outreach(touch)
-        all_stats.append(stats)
+    stats = run_social_outreach(1)
+    all_stats.append(stats)
 
     for s in all_stats:
         logger.info(
