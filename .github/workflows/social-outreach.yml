@@ -6,11 +6,11 @@ on:
       dry_run:
         description: "Dry run — log targets without launching PhantomBuster"
         required: false
-        default: "false"
+        default: "true"
         type: choice
         options:
-          - "false"
           - "true"
+          - "false"
 
 jobs:
   social:
