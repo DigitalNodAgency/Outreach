@@ -123,7 +123,9 @@ STRUCTURING_BATCH_SIZE = 10
 # ── PhantomBuster (social outreach) ───────────────────────────────────────────
 PHANTOMBUSTER_API_KEY = os.getenv("PHANTOMBUSTER_API_KEY", "")
 PHANTOMBUSTER_FB_PHANTOM_ID = os.getenv("PHANTOMBUSTER_FB_PHANTOM_ID", "")
+PHANTOMBUSTER_FB_SESSION_COOKIE = os.getenv("PHANTOMBUSTER_FB_SESSION_COOKIE", "")
 PHANTOMBUSTER_LI_PHANTOM_ID = os.getenv("PHANTOMBUSTER_LI_PHANTOM_ID", "")
+PHANTOMBUSTER_LI_SESSION_COOKIE = os.getenv("PHANTOMBUSTER_LI_SESSION_COOKIE", "")
 SOCIAL_PLATFORM = os.getenv("SOCIAL_PLATFORM", "both")  # facebook / linkedin / both
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 

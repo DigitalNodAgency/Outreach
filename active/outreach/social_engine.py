@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 from config import (
     PHANTOMBUSTER_API_KEY,
     PHANTOMBUSTER_FB_PHANTOM_ID,
+    PHANTOMBUSTER_FB_SESSION_COOKIE,
     PHANTOMBUSTER_LI_PHANTOM_ID,
+    PHANTOMBUSTER_LI_SESSION_COOKIE,
     DRY_RUN,
     TEMPLATES_DIR,
     SENDER_NAME,
@@ -28,6 +30,10 @@ def _now_iso() -> str:
 
 def _phantom_id_for(platform: str) -> str:
     return PHANTOMBUSTER_FB_PHANTOM_ID if platform == "facebook" else PHANTOMBUSTER_LI_PHANTOM_ID
+
+
+def _session_cookie_for(platform: str) -> str:
+    return PHANTOMBUSTER_FB_SESSION_COOKIE if platform == "facebook" else PHANTOMBUSTER_LI_SESSION_COOKIE
 
 
 def _url_field_for(platform: str) -> str:
@@ -98,7 +104,8 @@ def run_social_outreach(platform: str) -> dict:
         stats["launched"] = False
         return stats
 
-    container_id = launch_phantom(PHANTOMBUSTER_API_KEY, phantom_id, input_data)
+    session_cookie = _session_cookie_for(platform)
+    container_id = launch_phantom(PHANTOMBUSTER_API_KEY, phantom_id, input_data, session_cookie)
     if not container_id:
         logger.error(f"[SOCIAL] Failed to launch {platform} phantom.")
         _log_all_failed(leads, platform, url_field, "launch_failed")

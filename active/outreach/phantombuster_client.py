@@ -20,15 +20,18 @@ def _headers(api_key: str) -> dict:
     return {"X-Phantombuster-Key": api_key, "Content-Type": "application/json"}
 
 
-def launch_phantom(api_key: str, phantom_id: str, input_data: list[dict]) -> Optional[str]:
+def launch_phantom(api_key: str, phantom_id: str, input_data: list[dict], session_cookie: str = "") -> Optional[str]:
     """
     Launch a PhantomBuster phantom with the given lead input.
     Returns the container ID on success, None on failure.
     """
     url = f"{_PB_BASE}/agents/launch"
+    argument: dict = {"leads": input_data}
+    if session_cookie:
+        argument["sessionCookie"] = session_cookie
     payload = {
         "id": phantom_id,
-        "argument": {"leads": input_data},
+        "argument": argument,
     }
     try:
         resp = requests.post(url, json=payload, headers=_headers(api_key), timeout=30)
