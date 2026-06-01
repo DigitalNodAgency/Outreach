@@ -3,15 +3,6 @@ name: social-outreach
 on:
   workflow_dispatch:
     inputs:
-      platform:
-        description: "Platform to target (facebook / linkedin / both)"
-        required: true
-        default: "linkedin"
-        type: choice
-        options:
-          - facebook
-          - linkedin
-          - both
       dry_run:
         description: "Dry run — log targets without launching PhantomBuster"
         required: false
@@ -43,14 +34,13 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           PHANTOMBUSTER_API_KEY: ${{ secrets.PHANTOMBUSTER_API_KEY }}
-          PHANTOMBUSTER_FB_PHANTOM_ID: ${{ secrets.PHANTOMBUSTER_FB_PHANTOM_ID }}
-          PHANTOMBUSTER_FB_SESSION_COOKIE: ${{ secrets.PHANTOMBUSTER_FB_SESSION_COOKIE }}
           PHANTOMBUSTER_LI_PHANTOM_ID: ${{ secrets.PHANTOMBUSTER_LI_PHANTOM_ID }}
           PHANTOMBUSTER_LI_SESSION_COOKIE: ${{ secrets.PHANTOMBUSTER_LI_SESSION_COOKIE }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
-          SOCIAL_PLATFORM: ${{ github.event.inputs.platform }}
+          FOLLOWUP_DELAY_DAYS: ${{ vars.FOLLOWUP_DELAY_DAYS }}
+          SENDER_NAME: ${{ vars.SENDER_NAME }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
         run: python active/outreach/social_main.py
 

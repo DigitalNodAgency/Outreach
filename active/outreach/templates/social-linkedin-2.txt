@@ -1,0 +1,5 @@
+Hi {{name}}, every week those Google reviews sit there, they're working against you, especially heading into summer when everyone's searching for AC help. Your competitors with cleaner profiles are getting those calls instead.
+
+Still happy to discuss how we can solve this within 72 hours. You can set up a call here: https://calendly.com/mohitdm
+
+{{sender_name}}

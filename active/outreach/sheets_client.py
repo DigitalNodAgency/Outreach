@@ -340,36 +340,71 @@ def get_all_lead_emails_from_log() -> set[str]:
 
 # ── Social outreach ────────────────────────────────────────────────────────────
 
-def get_social_log_emails(platform: str) -> set[str]:
-    """Return emails already messaged via this platform (status=sent). Used to prevent re-sends."""
+def get_social_log_rows(platform: str) -> dict[str, dict]:
+    """
+    Return a map of {email: {"max_touch": int, "last_sent": str}} for all sent rows
+    on the given platform. Used to determine eligibility for each touch number.
+    Old rows without touch_number default to touch 1.
+    """
     ws = _get_sheet("social_log")
     rows = ws.get_all_values()
     if not rows or len(rows) < 2:
-        return set()
-    # Cols: lead_email(0), lead_name(1), platform(2), profile_url(3), sent_date(4), status(5), notes(6)
-    return {
-        row[0].lower()
-        for row in rows[1:]
-        if len(row) >= 6
-        and row[2].lower() == platform.lower()
-        and row[5].lower() == "sent"
-    }
+        return {}
+    result: dict[str, dict] = {}
+    for row in rows[1:]:
+        if len(row) < 6:
+            continue
+        if row[2].lower() != platform.lower():
+            continue
+        if row[5].lower() != "sent":
+            continue
+        email = row[0].lower()
+        touch = int(row[7]) if len(row) >= 8 and row[7].strip().isdigit() else 1
+        sent_date = row[4] if len(row) >= 5 else ""
+        if email not in result or touch > result[email]["max_touch"]:
+            result[email] = {"max_touch": touch, "last_sent": sent_date}
+    return result
 
 
-def get_leads_for_social_outreach(platform: str) -> list[dict]:
+def get_leads_for_social_outreach(platform: str, touch_number: int) -> list[dict]:
     """
-    Return leads that have a profile URL for the given platform, are not closed/replied,
-    and have not already been messaged on this platform.
+    Return leads eligible for the given touch number on this platform.
+    Touch 1: has linkedin_url, not in social_log at all.
+    Touch 2/3: received previous touch at least FOLLOWUP_DELAY_DAYS ago, not yet received this touch.
     """
-    col = "facebook_url" if platform == "facebook" else "linkedin_url"
+    from config import FOLLOWUP_DELAY_DAYS
+    from datetime import datetime, timezone, timedelta
+
     excluded = {"replied", "closed"}
-    already_messaged = get_social_log_emails(platform)
-    return [
+    log = get_social_log_rows(platform)
+    all_leads = [
         r for r in get_all_leads()
-        if r.get(col, "").strip()
+        if r.get("linkedin_url", "").strip()
         and r.get("status", "").lower() not in excluded
-        and r.get("email", "").lower() not in already_messaged
     ]
+
+    eligible = []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=FOLLOWUP_DELAY_DAYS)
+    for lead in all_leads:
+        email = lead.get("email", "").lower()
+        entry = log.get(email)
+        if touch_number == 1:
+            if entry is None:
+                eligible.append(lead)
+        else:
+            if entry is None:
+                continue
+            if entry["max_touch"] != touch_number - 1:
+                continue
+            try:
+                last = datetime.fromisoformat(entry["last_sent"].replace("Z", "+00:00"))
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+            except (ValueError, AttributeError):
+                continue
+            if last <= cutoff:
+                eligible.append(lead)
+    return eligible
 
 
 def append_social_log(entry: dict) -> None:
@@ -384,5 +419,6 @@ def append_social_log(entry: dict) -> None:
         entry.get("sent_date", ""),
         entry.get("status", ""),
         entry.get("notes", ""),
+        str(entry.get("touch_number", 1)),
     ]
     ws.append_row(row, value_input_option="RAW")

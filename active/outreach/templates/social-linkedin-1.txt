@@ -1,3 +1,5 @@
-Hi {{name}}, I help HVAC businesses in Florida build demand pipelines that hold through the slow season — not just summer peak. A few companies nearby have seen new enquiries in the first 30 days. Worth a quick connect?
+Hi {{name}},
 
-— {{sender_name}}
+9 out of 10 people read your Google reviews before they ever call an HVAC company. In a market as competitive as Florida, one or two bad reviews near the top can quietly send jobs to your competitors. I help HVAC owners clean up how they look on Google so the good stuff shows first and the bad stuff stops costing them calls. I do so with a 100% money back guarantee if I do not deliver. We can discuss how you can improve your Google presence and increase business here: https://calendly.com/mohitdm
+
+{{sender_name}}
