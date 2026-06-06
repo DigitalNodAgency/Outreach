@@ -117,11 +117,13 @@ def _normalize_record(raw: dict, source_tag: str) -> dict | None:
 def _deduplicate(
     candidates: list[dict],
     existing_emails: set[str],
+    existing_no_email: set[tuple[str, str]] | None = None,
 ) -> tuple[list[dict], int]:
     """
-    Two-level dedup:
+    Three-level dedup:
     Level 1 — exact email match (case-insensitive)
     Level 2 — domain + name similarity >85% (fuzzy, keep most senior)
+    Level 3 — (name, company) exact match for no-email leads
     Returns (clean_leads, dupe_count).
     """
     try:
@@ -142,6 +144,7 @@ def _deduplicate(
 
     seen_emails: set[str] = set(existing_emails)
     seen_domains: dict[str, dict] = {}
+    seen_no_email: set[tuple[str, str]] = set(existing_no_email or set())
     clean = []
     dupe_count = 0
 
@@ -150,12 +153,12 @@ def _deduplicate(
         domain = email.split("@")[-1] if "@" in email else ""
 
         # Level 1 — exact email
-        if email in seen_emails:
+        if email and email in seen_emails:
             logger.debug(f"[DEDUP] Exact email match — skipping: {email}")
             dupe_count += 1
             continue
 
-        # Level 2 — domain + name fuzzy
+        # Level 2 — domain + name fuzzy (email leads only)
         if has_fuzzy and domain and domain in seen_domains:
             existing = seen_domains[domain]
             name_sim = fuzz.ratio(lead["name"].lower(), existing["name"].lower())
@@ -166,6 +169,17 @@ def _deduplicate(
                 logger.debug(f"[DEDUP] Domain+name fuzzy match — skipping: {email}")
                 dupe_count += 1
                 continue
+
+        # Level 3 — (name, company) exact match for no-email leads
+        if not email:
+            name_key = lead.get("name", "").strip().lower()
+            company_key = lead.get("company", "").strip().lower()
+            pair = (name_key, company_key)
+            if name_key and pair in seen_no_email:
+                logger.debug(f"[DEDUP] No-email name+company match — skipping: {lead.get('name')} @ {lead.get('company')}")
+                dupe_count += 1
+                continue
+            seen_no_email.add(pair)
 
         seen_emails.add(email)
         seen_domains[domain] = lead
@@ -193,7 +207,7 @@ def run_vibe_ingest() -> dict:
     Main entry point for Vibe ingestion.
     Returns stats dict: new_leads, dupes_skipped, failed.
     """
-    from sheets_client import get_existing_emails, append_leads_batch
+    from sheets_client import get_existing_emails, get_existing_name_company_pairs, append_leads_batch
 
     stats = {"new_leads": 0, "dupes_skipped": 0, "failed": 0, "source": SOURCE_NAME}
 
@@ -229,7 +243,8 @@ def run_vibe_ingest() -> dict:
         return stats
 
     existing_emails = get_existing_emails()
-    clean, dupe_count = _deduplicate(normalized, existing_emails)
+    existing_no_email = get_existing_name_company_pairs()
+    clean, dupe_count = _deduplicate(normalized, existing_emails, existing_no_email)
     stats["dupes_skipped"] = dupe_count
 
     if clean:

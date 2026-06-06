@@ -28,6 +28,7 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           PROSPEO_API_KEY: ${{ secrets.PROSPEO_API_KEY }}
           VIBE_PROSPECTING_API_KEY: ${{ secrets.VIBE_PROSPECTING_API_KEY }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}

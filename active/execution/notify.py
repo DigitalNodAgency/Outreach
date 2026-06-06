@@ -42,12 +42,14 @@ def send_run_summary(
     new_leads: int = 0,
     dupes_skipped: int = 0,
     enrichment_results: dict = None,
+    social_results: dict = None,
     followup_staged: int = 0,
     errors: list[str] = None,
 ) -> None:
     """Phase 1 summary email to operator."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     enrichment_results = enrichment_results or {}
+    social_results = social_results or {}
     errors = errors or []
 
     lines = [
@@ -61,6 +63,10 @@ def send_run_summary(
         "Enrichment results:",
         f"  Prospeo enriched:        {enrichment_results.get('prospeo', 0)}",
         f"  Auto-deleted (no email): {enrichment_results.get('deleted', 0)}",
+        f"  LinkedIn URLs found:     {social_results.get('li_found', 0)}",
+        f"  LinkedIn not found:      {social_results.get('li_not_found', 0)}",
+        f"  Facebook URLs found:     {social_results.get('fb_found', 0)}",
+        f"  Facebook not found:      {social_results.get('fb_not_found', 0)}",
     ]
 
     if errors:

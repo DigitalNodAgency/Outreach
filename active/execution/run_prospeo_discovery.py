@@ -36,7 +36,7 @@ def run_prospeo_discovery(supplement_target: int = 25) -> dict:
     Returns stats dict.
     """
     from ingest_vibe_export import _deduplicate
-    from sheets_client import get_existing_emails, append_leads_batch
+    from sheets_client import get_existing_emails, get_existing_name_company_pairs, append_leads_batch
 
     stats = {
         "new_leads": 0,
@@ -80,7 +80,8 @@ def run_prospeo_discovery(supplement_target: int = 25) -> dict:
     all_leads = all_leads[:MAX_LEADS_PER_RUN]
 
     # Dedup against existing + within batch
-    clean, dupe_count = _deduplicate(all_leads, existing_emails)
+    existing_no_email = get_existing_name_company_pairs()
+    clean, dupe_count = _deduplicate(all_leads, existing_emails, existing_no_email)
     stats["dupes_skipped"] = dupe_count
 
     if clean:

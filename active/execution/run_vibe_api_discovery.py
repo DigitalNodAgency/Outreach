@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "outreach"))
 from config import STATUS_NEW
 from pipeline_metrics import log_pipeline_error, record_source_run, record_run_stats
 from ingest_vibe_export import _validate_email, _deduplicate
+from sheets_client import get_existing_name_company_pairs
 from notify import alert_token_exhausted
 
 logger = logging.getLogger(__name__)
@@ -236,7 +237,8 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
         return stats
 
     existing_emails = get_existing_emails()
-    clean, dupe_count = _deduplicate(normalized, existing_emails)
+    existing_no_email = get_existing_name_company_pairs()
+    clean, dupe_count = _deduplicate(normalized, existing_emails, existing_no_email)
     stats["dupes_skipped"] = dupe_count
 
     if clean:

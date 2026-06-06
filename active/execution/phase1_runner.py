@@ -43,6 +43,7 @@ def main() -> int:
     total_new = 0
     total_dupes = 0
     enrichment_results = {}
+    social_results = {}
     followup_staged = 0
 
     # Step 1 — Vibe Prospecting ingestion (primary source)
@@ -96,6 +97,15 @@ def main() -> int:
         log_pipeline_error("enrichment", f"{type(e).__name__}: {e}")
         logger.error(f"[PHASE1] Enrichment error (non-fatal): {type(e).__name__}: {e}")
 
+    # Step 3.5 — Social URL enrichment via Serper (fills LinkedIn col K + Facebook col J)
+    try:
+        from enrich_linkedin_step import run_social_url_enrichment
+        social_results = run_social_url_enrichment()
+        logger.info(f"[PHASE1] Social enrichment: {social_results}")
+    except Exception as e:
+        log_pipeline_error("social_enrichment", f"{type(e).__name__}: {e}")
+        logger.error(f"[PHASE1] Social enrichment error (non-fatal): {type(e).__name__}: {e}")
+
     # Step 4 — Follow-up staging (advance status/count, no emails sent)
     try:
         from sheets_client import advance_followup_staging
@@ -113,6 +123,7 @@ def main() -> int:
             new_leads=total_new,
             dupes_skipped=total_dupes,
             enrichment_results=enrichment_results,
+            social_results=social_results,
             followup_staged=followup_staged,
             errors=errors,
         )

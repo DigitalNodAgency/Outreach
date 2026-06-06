@@ -146,10 +146,10 @@ Lessons log: [active/research/lessons.md](active/research/lessons.md)
 
 ## 10. Project State and Persistent Decisions
 
-- **Last milestone:** Initial restructure complete (v1 | 2026-05-17)
-- **Current focus:** Client onboarding — ICP received, awaiting PhantomBuster FB phantom ID and template content
-- **Pending decisions:** Schedule times, template series, PhantomBuster FB phantom ID
-- **Known issues:** None
+- **Last milestone:** LinkedIn URL backfill script ready + PhantomBuster timezone resolved (v5 | 2026-06-02)
+- **Current focus:** Waiting on Mohit to reconnect PhantomBuster session cookie. Florida leads exhausted — all sequences sent. ICP expansion to TX/GA/NC/TN recommended and communicated to client. Mohit currently analysing data (2026-06-06).
+- **Pending decisions:** ICP expansion to TX/GA/NC/TN (recommended, awaiting approval). GitHub Actions vars FOLLOWUP_DELAY_DAYS=3 and MAX_LEADS_PER_RUN=30 still need manual update in repo settings.
+- **Known issues:** PhantomBuster session cookie expired (Mohit must reconnect). "No slots left (4/1)" confirmed not a blocker — max slots already filled.
 - **Locked choices:** No Apify Places, Serper discovery, SerpAPI, Apify Leads Finder (retired — ~3% email yield)
 
 ---
@@ -172,6 +172,18 @@ ICP_REGIONS              Target regions (comma-separated) — set after onboardi
 ICP_DISQUALIFY           Disqualification conditions — set after onboarding call
 ```
 
+### Phase 1 — GitHub repo secrets
+```
+GOOGLE_SERVICE_ACCOUNT_JSON    Client's service account JSON
+SPREADSHEET_ID                 Client's Google Sheet ID
+PROSPEO_API_KEY                Client's Prospeo key
+VIBE_PROSPECTING_API_KEY       Client's Vibe Prospecting key
+SERPER_API_KEY                 Client's Serper key — LinkedIn URL enrichment step (Step 3.5). Skipped gracefully if absent.
+GMAIL_SENDER                   Client's Gmail address for operator alerts
+GMAIL_APP_PASSWORD             Client's Gmail App Password
+NOTIFY_EMAIL                   Client's email for summary reports
+```
+
 ### Phase 2 — GitHub repo secrets
 ```
 GOOGLE_SERVICE_ACCOUNT_JSON    Client's service account JSON
@@ -184,9 +196,10 @@ GMAIL_APP_PASSWORD             Client's Gmail App Password (same value as IMAP_P
 NOTIFY_EMAIL                   Client's email for summary reports
 IMAP_HOST                      imap.gmail.com (fixed)
 IMAP_PASS                      Client's Gmail App Password for reply logger (same as GMAIL_APP_PASSWORD if same inbox)
-PHANTOMBUSTER_API_KEY          Client's PhantomBuster API key — social outreach
+PHANTOMBUSTER_API_KEY          Client's PhantomBuster API key — social outreach (standby: needs session cookie from Mohit)
 PHANTOMBUSTER_FB_PHANTOM_ID    PhantomBuster Facebook Message Sender phantom ID
 PHANTOMBUSTER_LI_PHANTOM_ID    PhantomBuster LinkedIn Message Sender phantom ID
+PHANTOMBUSTER_LI_SESSION_COOKIE LinkedIn session cookie — required to activate social-outreach.yml (pending Mohit)
 ```
 
 ### Phase 2 — GitHub repo variables (non-secret)
@@ -206,6 +219,8 @@ SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mircha
 - [v2 | 2026-05-21 | Social outreach added: PhantomBuster Facebook + LinkedIn via social-outreach.yml (manual dispatch). Leads sheet col K = linkedin_url. Instagram replaced by LinkedIn throughout.]
 - [v3 | 2026-05-23 | Switched Vibe discovery from MCP export-to-csv to direct Explorium REST API (api.explorium.ai/v1). Root cause: export-to-csv returns a portal URL (app.vibeprospecting.ai/lists), not a programmable download endpoint. REST API requires mode:"full" at root and all filters nested under "filters" key. Removed has_email filter to allow name-only leads through to the enrichment tier (Prospeo T0).]
 - [v4 | 2026-05-24 | Phase 2 SMTP fix: SMTP_FROM was silently falling back to SMTP_USER (Brevo relay credential) causing Brevo to reject sends. Fixed smtp_client.py to use SMTP_FROM exclusively with hard validation. Workflow fix: SMTP_FROM missing from phase2-outreach.yml env block. Warmth score formula added (seniority+size+linkedin+email, 0-10). Explorium credit alert added. Template: removed EY/Waseda line from touch-standard-1.txt.]
+- [v5 | 2026-06-02 | LinkedIn URL backfill: one-shot scripts/enrich_linkedin_urls.py created to back-fill column K for existing leads using Serper (site:linkedin.com/in query). Delete after use. PhantomBuster timezone confirmed as workspace-level setting (Account Settings → Workspace Settings → Timezone → America/New_York). Session cookie refresh required from Mohit to unblock LinkedIn outreach.]
+- [v6 | 2026-06-06 | LinkedIn URL enrichment integrated into Phase 1 as Step 3.5 (enrich_linkedin_step.py). Serper used as fallback when Vibe/Explorium does not return linkedin_url. SERPER_API_KEY added to phase1-discovery.yml (GitHub secret — add to repo settings). social-outreach.yml remains workflow_dispatch only (standby, pending Mohit credentials). No-email lead dedup fixed: added Level 3 (name+company pair) to _deduplicate() and get_existing_name_company_pairs() to sheets_client.py.]
 
 ---
 
@@ -229,8 +244,8 @@ Root cause: return business listings without verified personal emails. Yield ~3%
 ICP_PERSONA     = HVAC company owner,founder,CEO,director,Head of Marketing,CMO
 ICP_COMPANY_SIZE= 10-50,50-200
 ICP_INDUSTRIES  = HVAC,Heating Ventilation and Air Conditioning
-ICP_REGIONS     = Florida,USA
-ICP_DISQUALIFY  = Any company outside the HVAC industry or outside Florida USA
+ICP_REGIONS     = Florida,USA  ← SATURATING. Expansion to TX,GA,NC,TN recommended, awaiting client approval.
+ICP_DISQUALIFY  = Any company outside the HVAC industry or outside Florida USA  ← update when ICP expands
 DAILY_EMAIL_CAP = 300
 MAX_LEADS_PER_RUN = 100
 ```

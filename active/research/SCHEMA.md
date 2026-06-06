@@ -17,6 +17,8 @@
 | 6     | last_contacted   | string  | ISO 8601 UTC timestamp. Set on each send.          |
 | 7     | followup_count   | integer | Increments on each successful send.                |
 | 8     | notes            | string  | Free text. Manual use only.                        |
+| 9     | facebook_url     | string  | Facebook profile/page URL. Auto-filled by Step 3.5 (Serper). |
+| 10    | linkedin_url     | string  | LinkedIn /in/ profile URL. Auto-filled by Step 3.5 (Serper). |
 
 **Status values:**
 ```

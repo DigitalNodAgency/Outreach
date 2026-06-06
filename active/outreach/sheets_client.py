@@ -83,6 +83,20 @@ def get_existing_emails() -> set[str]:
     return {e.strip().lower() for e in all_values[1:] if e.strip()}
 
 
+def get_existing_name_company_pairs() -> set[tuple[str, str]]:
+    """(name_lower, company_lower) pairs for leads with no email. Fallback dedup key."""
+    ws = _get_sheet("Leads")
+    all_rows = ws.get_all_values()
+    pairs = set()
+    for row in all_rows[1:]:
+        email = row[COL_EMAIL].strip() if len(row) > COL_EMAIL else ""
+        name = row[COL_NAME].strip().lower() if len(row) > COL_NAME else ""
+        company = row[COL_COMPANY].strip().lower() if len(row) > COL_COMPANY else ""
+        if not email and name:
+            pairs.add((name, company))
+    return pairs
+
+
 def get_leads_by_status(status: str) -> list[dict]:
     """Return leads matching a specific status value."""
     all_leads = get_all_leads()
