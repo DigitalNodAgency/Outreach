@@ -146,11 +146,12 @@ Lessons log: [active/research/lessons.md](active/research/lessons.md)
 
 ## 10. Project State and Persistent Decisions
 
-- **Last milestone:** LinkedIn URL backfill script ready + PhantomBuster timezone resolved (v5 | 2026-06-02)
-- **Current focus:** Waiting on Mohit to reconnect PhantomBuster session cookie. Florida leads exhausted — all sequences sent. ICP expansion to TX/GA/NC/TN recommended and communicated to client. Mohit currently analysing data (2026-06-06).
-- **Pending decisions:** ICP expansion to TX/GA/NC/TN (recommended, awaiting approval). GitHub Actions vars FOLLOWUP_DELAY_DAYS=3 and MAX_LEADS_PER_RUN=30 still need manual update in repo settings.
-- **Known issues:** PhantomBuster session cookie expired (Mohit must reconnect). "No slots left (4/1)" confirmed not a blocker — max slots already filled.
-- **Locked choices:** No Apify Places, Serper discovery, SerpAPI, Apify Leads Finder (retired — ~3% email yield)
+- **Last milestone:** ICP expanded to TX/GA/NC/TN, region filter now dynamic (v7 | 2026-06-12)
+- **Current focus:** PhantomBuster LinkedIn outreach LIVE (24 leads queued, native wizard). Python social outreach engine pending removal next session.
+- **Pending decisions:** None.
+- **TODO next session:** Remove Python social outreach engine (social_main.py, social_engine.py, phantombuster_client.py, social-outreach.yml) — replaced by PhantomBuster native wizard.
+- **Known issues:** None blocking. PhantomBuster session reconnected by Mohit (2026-06-09).
+- **Locked choices:** No Apify Places, Serper discovery, SerpAPI, Apify Leads Finder (retired — ~3% email yield). Social outreach = PhantomBuster native only (not Python engine).
 
 ---
 
@@ -221,6 +222,7 @@ SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mircha
 - [v4 | 2026-05-24 | Phase 2 SMTP fix: SMTP_FROM was silently falling back to SMTP_USER (Brevo relay credential) causing Brevo to reject sends. Fixed smtp_client.py to use SMTP_FROM exclusively with hard validation. Workflow fix: SMTP_FROM missing from phase2-outreach.yml env block. Warmth score formula added (seniority+size+linkedin+email, 0-10). Explorium credit alert added. Template: removed EY/Waseda line from touch-standard-1.txt.]
 - [v5 | 2026-06-02 | LinkedIn URL backfill: one-shot scripts/enrich_linkedin_urls.py created to back-fill column K for existing leads using Serper (site:linkedin.com/in query). Delete after use. PhantomBuster timezone confirmed as workspace-level setting (Account Settings → Workspace Settings → Timezone → America/New_York). Session cookie refresh required from Mohit to unblock LinkedIn outreach.]
 - [v6 | 2026-06-06 | LinkedIn URL enrichment integrated into Phase 1 as Step 3.5 (enrich_linkedin_step.py). Serper used as fallback when Vibe/Explorium does not return linkedin_url. SERPER_API_KEY added to phase1-discovery.yml (GitHub secret — add to repo settings). social-outreach.yml remains workflow_dispatch only (standby, pending Mohit credentials). No-email lead dedup fixed: added Level 3 (name+company pair) to _deduplicate() and get_existing_name_company_pairs() to sheets_client.py.]
+- [v7 | 2026-06-12 | ICP region expansion approved: TX, GA, NC, TN added alongside FL. run_vibe_api_discovery.py now reads ICP_REGIONS env var dynamically (was hardcoded to us-fl). Root cause of zero new leads: Florida market saturating + filter never reading env var. Update ICP_REGIONS GitHub Actions repo variable to: Florida,Texas,Georgia,North Carolina,Tennessee,USA]
 
 ---
 
@@ -244,8 +246,8 @@ Root cause: return business listings without verified personal emails. Yield ~3%
 ICP_PERSONA     = HVAC company owner,founder,CEO,director,Head of Marketing,CMO
 ICP_COMPANY_SIZE= 10-50,50-200
 ICP_INDUSTRIES  = HVAC,Heating Ventilation and Air Conditioning
-ICP_REGIONS     = Florida,USA  ← SATURATING. Expansion to TX,GA,NC,TN recommended, awaiting client approval.
-ICP_DISQUALIFY  = Any company outside the HVAC industry or outside Florida USA  ← update when ICP expands
+ICP_REGIONS     = Florida,Texas,Georgia,North Carolina,Tennessee,USA
+ICP_DISQUALIFY  = Any company outside the HVAC industry or outside Florida, Texas, Georgia, North Carolina, Tennessee
 DAILY_EMAIL_CAP = 300
 MAX_LEADS_PER_RUN = 100
 ```

@@ -14,7 +14,38 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "outreach"))
 
-from config import STATUS_NEW
+from config import STATUS_NEW, ICP_REGIONS
+
+# Maps human-readable state/region names (lowercase) to Explorium region codes
+_STATE_CODE_MAP = {
+    "florida": "us-fl",
+    "texas": "us-tx",
+    "georgia": "us-ga",
+    "north carolina": "us-nc",
+    "tennessee": "us-tn",
+    "california": "us-ca",
+    "new york": "us-ny",
+    "ohio": "us-oh",
+    "illinois": "us-il",
+    "arizona": "us-az",
+    "colorado": "us-co",
+    "virginia": "us-va",
+    "washington": "us-wa",
+    "nevada": "us-nv",
+    "michigan": "us-mi",
+}
+
+def _build_region_codes() -> list[str]:
+    """Parse ICP_REGIONS env var into Explorium region codes. Falls back to us-fl."""
+    raw = ICP_REGIONS.strip()
+    if not raw or raw.startswith("["):
+        return ["us-fl"]
+    codes = []
+    for token in raw.split(","):
+        name = token.strip().lower()
+        if name in _STATE_CODE_MAP:
+            codes.append(_STATE_CODE_MAP[name])
+    return codes if codes else ["us-fl"]
 from pipeline_metrics import log_pipeline_error, record_source_run, record_run_stats
 from ingest_vibe_export import _validate_email, _deduplicate
 from sheets_client import get_existing_name_company_pairs
@@ -83,12 +114,14 @@ def _source_tag() -> str:
 
 def _fetch_prospects(api_key: str, target: int) -> list[dict]:
     """Fetch prospect records via POST /v1/prospects with ICP filters."""
+    region_codes = _build_region_codes()
+    logger.info(f"[VIBE API] Querying regions: {region_codes}")
     body = {
         "mode": "full",
         "page": 1,
         "page_size": min(target, 100),
         "filters": {
-            "company_region_country_code": {"values": ["us-fl"]},
+            "company_region_country_code": {"values": region_codes},
             "job_level": {"values": ["cxo", "partner", "director", "vp"]},
             "company_size": {"values": ["1-10", "11-50", "51-200"]},
             "naics_category": {"values": ["238220"]},  # HVAC contractors (NAICS 238220)
