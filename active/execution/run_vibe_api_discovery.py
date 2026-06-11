@@ -2,6 +2,8 @@
 run_vibe_api_discovery.py — Direct Explorium REST API client.
 Calls api.explorium.ai/v1 using VIBE_PROSPECTING_API_KEY.
 Runs on GitHub Actions without requiring a Claude Code MCP session or CSV export.
+All ICP filters (regions, job levels, company sizes, industries) are read from
+environment variables — never hardcoded.
 """
 
 import logging
@@ -14,9 +16,30 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "outreach"))
 
-from config import STATUS_NEW, ICP_REGIONS
+from config import (
+    STATUS_NEW,
+    ICP_REGIONS,
+    ICP_PERSONA,
+    ICP_COMPANY_SIZE,
+    ICP_INDUSTRIES,
+)
+from pipeline_metrics import log_pipeline_error, record_source_run, record_run_stats
+from ingest_vibe_export import _validate_email, _deduplicate
+from sheets_client import get_existing_name_company_pairs
+from notify import alert_token_exhausted
 
-# Maps human-readable state/region names (lowercase) to Explorium region codes
+logger = logging.getLogger(__name__)
+
+BASE_URL = "https://api.explorium.ai/v1"
+REQUEST_TIMEOUT = 60
+SOURCE_NAME = "vibe_api"
+ENRICH_DELAY = 0.3  # seconds between per-prospect enrich calls
+
+_CREDIT_KEYWORDS = ("credit", "quota", "limit exceeded", "insufficient", "out of")
+
+# ── ICP → Explorium filter mappers ────────────────────────────────────────────
+
+# State name (lowercase) → Explorium region code
 _STATE_CODE_MAP = {
     "florida": "us-fl",
     "texas": "us-tx",
@@ -33,7 +56,60 @@ _STATE_CODE_MAP = {
     "washington": "us-wa",
     "nevada": "us-nv",
     "michigan": "us-mi",
+    "new jersey": "us-nj",
+    "pennsylvania": "us-pa",
+    "massachusetts": "us-ma",
+    "utah": "us-ut",
+    "minnesota": "us-mn",
 }
+
+# Job title keyword (lowercase) → Explorium job_level code
+_PERSONA_TO_JOB_LEVEL = {
+    "owner": "cxo",
+    "founder": "cxo",
+    "ceo": "cxo",
+    "cmo": "cxo",
+    "coo": "cxo",
+    "cto": "cxo",
+    "president": "cxo",
+    "principal": "cxo",
+    "partner": "partner",
+    "director": "director",
+    "head of": "director",
+    "vp": "vp",
+    "vice president": "vp",
+    "manager": "manager",
+}
+
+# Explorium company_size buckets with numeric bounds for range matching
+_EXPLORIUM_SIZE_BUCKETS = [
+    ("1-10",       1,    10),
+    ("11-50",     11,    50),
+    ("51-200",    51,   200),
+    ("201-500",  201,   500),
+    ("501-1000", 501,  1000),
+    ("1001-5000", 1001, 5000),
+]
+
+# Industry keyword (lowercase) → NAICS codes
+_INDUSTRY_TO_NAICS = {
+    "hvac": ["238220"],
+    "heating ventilation": ["238220"],
+    "heating and cooling": ["238220"],
+    "air conditioning": ["238220"],
+    "heating": ["238220"],
+    "cooling": ["238220"],
+    "mechanical contractor": ["238220"],
+    "plumbing": ["238220"],
+    "electrical": ["238210"],
+    "roofing": ["238160"],
+    "landscaping": ["561730"],
+    "pest control": ["561710"],
+    "cleaning": ["561720"],
+    "construction": ["236220"],
+    "painting": ["238320"],
+}
+
 
 def _build_region_codes() -> list[str]:
     """Parse ICP_REGIONS env var into Explorium region codes. Falls back to us-fl."""
@@ -46,21 +122,59 @@ def _build_region_codes() -> list[str]:
         if name in _STATE_CODE_MAP:
             codes.append(_STATE_CODE_MAP[name])
     return codes if codes else ["us-fl"]
-from pipeline_metrics import log_pipeline_error, record_source_run, record_run_stats
-from ingest_vibe_export import _validate_email, _deduplicate
-from sheets_client import get_existing_name_company_pairs
-from notify import alert_token_exhausted
-
-logger = logging.getLogger(__name__)
-
-BASE_URL = "https://api.explorium.ai/v1"
-REQUEST_TIMEOUT = 60
-SOURCE_NAME = "vibe_api"
-ENRICH_DELAY = 0.3  # seconds between per-prospect enrich calls
 
 
-_CREDIT_KEYWORDS = ("credit", "quota", "limit exceeded", "insufficient", "out of")
+def _build_job_levels() -> list[str]:
+    """Parse ICP_PERSONA env var into Explorium job_level codes. Falls back to cxo+director."""
+    raw = ICP_PERSONA.strip()
+    if not raw or raw.startswith("["):
+        return ["cxo", "partner", "director", "vp"]
+    levels = set()
+    for token in raw.split(","):
+        token_lower = token.strip().lower()
+        for keyword, level in _PERSONA_TO_JOB_LEVEL.items():
+            if keyword in token_lower:
+                levels.add(level)
+                break
+    return list(levels) if levels else ["cxo", "partner", "director", "vp"]
 
+
+def _build_company_sizes() -> list[str]:
+    """Parse ICP_COMPANY_SIZE env var into Explorium company_size codes.
+    Matches any Explorium bucket that overlaps the requested range.
+    Falls back to 1-10, 11-50, 51-200."""
+    raw = ICP_COMPANY_SIZE.strip()
+    if not raw or raw.startswith("["):
+        return ["1-10", "11-50", "51-200"]
+    sizes = set()
+    for token in raw.split(","):
+        token = token.strip()
+        try:
+            parts = token.split("-")
+            lo = int(parts[0])
+            hi = int(parts[1]) if len(parts) > 1 else lo
+        except (ValueError, IndexError):
+            continue
+        for bucket, b_lo, b_hi in _EXPLORIUM_SIZE_BUCKETS:
+            if lo <= b_hi and hi >= b_lo:
+                sizes.add(bucket)
+    return list(sizes) if sizes else ["1-10", "11-50", "51-200"]
+
+
+def _build_naics_codes() -> list[str]:
+    """Parse ICP_INDUSTRIES env var into NAICS codes. Falls back to 238220 (HVAC)."""
+    raw = ICP_INDUSTRIES.strip()
+    if not raw or raw.startswith("["):
+        return ["238220"]
+    codes = set()
+    raw_lower = raw.lower()
+    for keyword, naics_list in _INDUSTRY_TO_NAICS.items():
+        if keyword in raw_lower:
+            codes.update(naics_list)
+    return list(codes) if codes else ["238220"]
+
+
+# ── Core API functions ─────────────────────────────────────────────────────────
 
 def _is_credit_exhausted(resp) -> bool:
     try:
@@ -71,12 +185,8 @@ def _is_credit_exhausted(resp) -> bool:
 
 
 def _compute_warmth_score(prospect: dict, has_email: bool) -> int:
-    """
-    Score 0–10 based on ICP fit signals available from Explorium response.
-    Seniority (5) + company size (2) + linkedin url (2) + email (1).
-    """
+    """Score 0–10: seniority (5) + company size (2) + linkedin url (2) + email (1)."""
     score = 0
-
     job_level = prospect.get("job_level", "").lower()
     if job_level in ("cxo", "partner"):
         score += 5
@@ -84,19 +194,15 @@ def _compute_warmth_score(prospect: dict, has_email: bool) -> int:
         score += 3
     else:
         score += 1
-
     company_size = prospect.get("company_size", "")
     if company_size in ("11-50", "51-200"):
         score += 2
     elif company_size == "1-10":
         score += 1
-
     if prospect.get("linkedin_url", "").strip():
         score += 2
-
     if has_email:
         score += 1
-
     return min(score, 10)
 
 
@@ -113,18 +219,24 @@ def _source_tag() -> str:
 
 
 def _fetch_prospects(api_key: str, target: int) -> list[dict]:
-    """Fetch prospect records via POST /v1/prospects with ICP filters."""
+    """Fetch prospect records via POST /v1/prospects with ICP filters from env vars."""
     region_codes = _build_region_codes()
-    logger.info(f"[VIBE API] Querying regions: {region_codes}")
+    job_levels = _build_job_levels()
+    company_sizes = _build_company_sizes()
+    naics_codes = _build_naics_codes()
+    logger.info(
+        f"[VIBE API] Filters — regions: {region_codes}, "
+        f"job_levels: {job_levels}, sizes: {company_sizes}, naics: {naics_codes}"
+    )
     body = {
         "mode": "full",
         "page": 1,
         "page_size": min(target, 100),
         "filters": {
             "company_region_country_code": {"values": region_codes},
-            "job_level": {"values": ["cxo", "partner", "director", "vp"]},
-            "company_size": {"values": ["1-10", "11-50", "51-200"]},
-            "naics_category": {"values": ["238220"]},  # HVAC contractors (NAICS 238220)
+            "job_level": {"values": job_levels},
+            "company_size": {"values": company_sizes},
+            "naics_category": {"values": naics_codes},
         },
     }
     try:
@@ -189,24 +301,20 @@ def _normalize_prospect(prospect: dict, email: str, source_tag: str) -> dict | N
     """Normalize a REST API prospect object to Sheets schema."""
     if email and not _validate_email(email):
         return None
-
     company = (
         prospect.get("company_name", "")
         or prospect.get("organization_name", "")
     ).strip()
     if not company:
         return None
-
     name = (
         prospect.get("full_name", "")
         or f"{prospect.get('first_name', '')} {prospect.get('last_name', '')}".strip()
     ).strip()
-
     region = (
         prospect.get("region_name", "")
         or prospect.get("country_name", "")
     ).strip().upper()
-
     return {
         "name": name,
         "email": email.lower(),
@@ -251,11 +359,9 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
         if not prospect_id:
             failed += 1
             continue
-
         email = _enrich_email(api_key, prospect_id)
         if i < len(prospects) - 1:
             time.sleep(ENRICH_DELAY)
-
         record = _normalize_prospect(prospect, email, source_tag)
         if record:
             normalized.append(record)
