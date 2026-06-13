@@ -218,8 +218,12 @@ def _source_tag() -> str:
     return f"vibe_{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
 
 
+_EXPLORIUM_PAGE_SIZE = 100  # Explorium API hard cap per page
+
+
 def _fetch_prospects(api_key: str, target: int) -> list[dict]:
-    """Fetch prospect records via POST /v1/prospects with ICP filters from env vars."""
+    """Fetch prospect records via POST /v1/prospects with ICP filters from env vars.
+    Paginates automatically when target > 100 (Explorium page_size cap)."""
     region_codes = _build_region_codes()
     job_levels = _build_job_levels()
     company_sizes = _build_company_sizes()
@@ -228,42 +232,57 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
         f"[VIBE API] Filters — regions: {region_codes}, "
         f"job_levels: {job_levels}, sizes: {company_sizes}, naics: {naics_codes}"
     )
-    body = {
-        "mode": "full",
-        "page": 1,
-        "page_size": min(target, 100),
-        "filters": {
-            "company_region_country_code": {"values": region_codes},
-            "job_level": {"values": job_levels},
-            "company_size": {"values": company_sizes},
-            "naics_category": {"values": naics_codes},
-        },
-    }
-    try:
-        resp = requests.post(
-            f"{BASE_URL}/prospects",
-            json=body,
-            headers=_headers(api_key),
-            timeout=REQUEST_TIMEOUT,
-        )
-        if not resp.ok:
-            if resp.status_code == 402 or _is_credit_exhausted(resp):
-                alert_token_exhausted("Explorium", resp.text[:300])
-            logger.error(f"[VIBE API] fetch_prospects {resp.status_code}: {resp.text[:500]}")
-            return []
-        data = resp.json()
-        prospects = data.get("data", [])
-        logger.info(
-            f"[VIBE API] fetch_prospects: {len(prospects)} returned "
-            f"(total_results={data.get('total_results', '?')})"
-        )
-        if prospects:
-            logger.debug(f"[VIBE API] First prospect fields: {list(prospects[0].keys())}")
-            logger.debug(f"[VIBE API] First prospect sample: {prospects[0]}")
-        return prospects
-    except Exception as e:
-        logger.error(f"[VIBE API] fetch_prospects error: {e}")
-        return []
+    all_prospects: list[dict] = []
+    page = 1
+
+    while len(all_prospects) < target:
+        page_size = min(target - len(all_prospects), _EXPLORIUM_PAGE_SIZE)
+        body = {
+            "mode": "full",
+            "page": page,
+            "page_size": page_size,
+            "filters": {
+                "company_region_country_code": {"values": region_codes},
+                "job_level": {"values": job_levels},
+                "company_size": {"values": company_sizes},
+                "naics_category": {"values": naics_codes},
+            },
+        }
+        try:
+            resp = requests.post(
+                f"{BASE_URL}/prospects",
+                json=body,
+                headers=_headers(api_key),
+                timeout=REQUEST_TIMEOUT,
+            )
+            if not resp.ok:
+                if resp.status_code == 402 or _is_credit_exhausted(resp):
+                    alert_token_exhausted("Explorium", resp.text[:300])
+                logger.error(f"[VIBE API] fetch_prospects page {page} {resp.status_code}: {resp.text[:500]}")
+                break
+            data = resp.json()
+            page_prospects = data.get("data", [])
+            total_available = data.get("total_results", 0)
+            logger.info(
+                f"[VIBE API] page {page}: {len(page_prospects)} returned "
+                f"(total_results={total_available})"
+            )
+            if not page_prospects:
+                break
+            all_prospects.extend(page_prospects)
+            # Stop if we've consumed all available results
+            if total_available and len(all_prospects) >= total_available:
+                break
+            page += 1
+        except Exception as e:
+            logger.error(f"[VIBE API] fetch_prospects page {page} error: {e}")
+            break
+
+    if all_prospects:
+        logger.debug(f"[VIBE API] First prospect fields: {list(all_prospects[0].keys())}")
+        logger.debug(f"[VIBE API] First prospect sample: {all_prospects[0]}")
+    logger.info(f"[VIBE API] Total fetched: {len(all_prospects)} prospects (target={target})")
+    return all_prospects
 
 
 def _enrich_email(api_key: str, prospect_id: str) -> str:
