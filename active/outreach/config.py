@@ -20,13 +20,26 @@ def _require(key: str) -> str:
     return val
 
 
+def _int_env(key: str, default: int) -> int:
+    """int() of an env var, treating an empty string the same as absent.
+    GitHub Actions injects an *undefined* `${{ vars.X }}` as "" (not missing),
+    so `int(os.getenv(key, default))` would hit `int("")` and crash the whole
+    run at import. `or default` falls back safely. See CLAUDE.md §12."""
+    return int(os.getenv(key) or default)
+
+
+def _float_env(key: str, default: float) -> float:
+    """float() of an env var, empty-string-safe (see _int_env)."""
+    return float(os.getenv(key) or default)
+
+
 # ── Google Sheets ──────────────────────────────────────────────────────────────
 SPREADSHEET_ID = _require("SPREADSHEET_ID")
 GOOGLE_SERVICE_ACCOUNT_JSON = _require("GOOGLE_SERVICE_ACCOUNT_JSON")
 
 # ── Brevo SMTP ─────────────────────────────────────────────────────────────────
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp-relay.brevo.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_PORT = _int_env("SMTP_PORT", 587)
 SMTP_USER = os.getenv("SMTP_USER", "").strip()
 SMTP_PASS = os.getenv("SMTP_PASS", "").strip()
 SMTP_FROM = os.getenv("SMTP_FROM", "").strip()
@@ -38,12 +51,12 @@ GMAIL_APP_PASSWORD = _require("GMAIL_APP_PASSWORD")
 NOTIFY_EMAIL = _require("NOTIFY_EMAIL")
 
 # ── Outreach limits ────────────────────────────────────────────────────────────
-DAILY_EMAIL_CAP = int(os.getenv("DAILY_EMAIL_CAP", "300"))
-FOLLOWUP_DELAY_DAYS = int(os.getenv("FOLLOWUP_DELAY_DAYS", "3"))
-MAX_FOLLOWUPS = int(os.getenv("MAX_FOLLOWUPS", "3"))
-SEND_DELAY_SECONDS = float(os.getenv("SEND_DELAY_SECONDS", "5"))
-SMTP_HEALTH_MIN_SENDS = int(os.getenv("SMTP_HEALTH_MIN_SENDS", "5"))
-SMTP_HEALTH_FAIL_THRESHOLD = float(os.getenv("SMTP_HEALTH_FAIL_THRESHOLD", "0.5"))
+DAILY_EMAIL_CAP = _int_env("DAILY_EMAIL_CAP", 300)
+FOLLOWUP_DELAY_DAYS = _int_env("FOLLOWUP_DELAY_DAYS", 3)
+MAX_FOLLOWUPS = _int_env("MAX_FOLLOWUPS", 3)
+SEND_DELAY_SECONDS = _float_env("SEND_DELAY_SECONDS", 5)
+SMTP_HEALTH_MIN_SENDS = _int_env("SMTP_HEALTH_MIN_SENDS", 5)
+SMTP_HEALTH_FAIL_THRESHOLD = _float_env("SMTP_HEALTH_FAIL_THRESHOLD", 0.5)
 
 # ── Landing page / booking ─────────────────────────────────────────────────────
 CALENDLY_URL = os.getenv("CALENDLY_URL", "")
@@ -117,7 +130,7 @@ STATUS_CLOSED = "closed"
 STATUS_FAILED = "failed"
 
 # ── Discovery ─────────────────────────────────────────────────────────────────
-MAX_LEADS_PER_RUN = int(os.getenv("MAX_LEADS_PER_RUN", "100"))
+MAX_LEADS_PER_RUN = _int_env("MAX_LEADS_PER_RUN", 100)
 STRUCTURING_BATCH_SIZE = 10
 
 # ── PhantomBuster (social outreach) ───────────────────────────────────────────
