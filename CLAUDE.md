@@ -146,7 +146,7 @@ Lessons log: [active/research/lessons.md](active/research/lessons.md)
 
 ## 10. Project State and Persistent Decisions
 
-- **Last milestone:** ICP expanded to TX/GA/NC/TN, region filter now dynamic (v7 | 2026-06-12)
+- **Last milestone:** Sheets 429 quota halt fixed + empty-env-var crash hardening (v8/v9 | 2026-06-13). Phase 2 backlog cleared (0 leads at status=new).
 - **Current focus:** PhantomBuster LinkedIn outreach LIVE (24 leads queued, native wizard). Python social outreach engine pending removal next session.
 - **Pending decisions:** None.
 - **TODO next session:** Remove Python social outreach engine (social_main.py, social_engine.py, phantombuster_client.py, social-outreach.yml) — replaced by PhantomBuster native wizard.
@@ -223,6 +223,8 @@ SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mircha
 - [v5 | 2026-06-02 | LinkedIn URL backfill: one-shot scripts/enrich_linkedin_urls.py created to back-fill column K for existing leads using Serper (site:linkedin.com/in query). Delete after use. PhantomBuster timezone confirmed as workspace-level setting (Account Settings → Workspace Settings → Timezone → America/New_York). Session cookie refresh required from Mohit to unblock LinkedIn outreach.]
 - [v6 | 2026-06-06 | LinkedIn URL enrichment integrated into Phase 1 as Step 3.5 (enrich_linkedin_step.py). Serper used as fallback when Vibe/Explorium does not return linkedin_url. SERPER_API_KEY added to phase1-discovery.yml (GitHub secret — add to repo settings). social-outreach.yml remains workflow_dispatch only (standby, pending Mohit credentials). No-email lead dedup fixed: added Level 3 (name+company pair) to _deduplicate() and get_existing_name_company_pairs() to sheets_client.py.]
 - [v7 | 2026-06-12 | ICP region expansion approved: TX, GA, NC, TN added alongside FL. run_vibe_api_discovery.py now reads ICP_REGIONS env var dynamically (was hardcoded to us-fl). Root cause of zero new leads: Florida market saturating + filter never reading env var. Update ICP_REGIONS GitHub Actions repo variable to: Florida,Texas,Georgia,North Carolina,Tennessee,USA]
+- [v8 | 2026-06-13 | Sheets 429 quota halt fixed. Phase 2 Touch 1 aborted after ~8 leads each run (APIError 429 "Read requests per minute"), stranding the rest at status=new. Root cause in sheets_client.py: _get_sheet() re-authorized gspread + re-ran open_by_key on EVERY call, and update_lead_status re-read the whole email column per lead, with no 429 backoff. Fix: per-process cache of client/spreadsheet/worksheet handles; cached Leads email column (invalidated on append/delete); ensure_headers once per tab per run; _with_backoff() retry wrapper (429/500/503, 1s base, 3 retries); 3× update_cell per lead collapsed into one batch_update. Local run cleared the full backlog in one pass, single auth line, no 429.]
+- [v9 | 2026-06-13 | Empty-env-var crash hardening. GitHub Actions injects an UNDEFINED `${{ vars.X }}` as "" (not absent), so `int(os.getenv(key, default))` hit `int("")` → ValueError at config import → entire run (any entry point) died silently. Added _int_env/_float_env helpers in config.py (`os.getenv(key) or default`) and routed all int/float env parses through them — notably the workflow-injected FOLLOWUP_DELAY_DAYS, MAX_FOLLOWUPS (phase2/social) and MAX_LEADS_PER_RUN (phase1). Defaults now apply on empty injection instead of crashing.]
 
 ---
 
