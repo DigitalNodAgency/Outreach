@@ -169,6 +169,23 @@ def get_leads_by_status(status: str) -> list[dict]:
     return [r for r in all_leads if r.get("status", "").strip().lower() == status.lower()]
 
 
+def get_leads_raw_values() -> list[list[str]]:
+    """All Leads rows as raw value lists (cached client + 429 backoff).
+    For callers that write back by row index (e.g. social URL enrichment)."""
+    ws = _get_sheet("Leads")
+    return _with_backoff(ws.get_all_values)
+
+
+def update_lead_cell(row_idx: int, col_zero_based: int, value: str) -> None:
+    """Update a single Leads cell by 1-based row and 0-based column.
+    Routes through the cached client with 429 backoff. Invalidates the email
+    cache if the email column itself is written."""
+    ws = _get_sheet("Leads")
+    _with_backoff(ws.update_cell, row_idx, col_zero_based + 1, value)
+    if col_zero_based == COL_EMAIL:
+        _invalidate_leads_email_col()
+
+
 def append_leads_batch(leads: list[dict]) -> int:
     """
     Batch-write new leads to Leads tab. Single API call.

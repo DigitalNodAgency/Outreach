@@ -16,8 +16,6 @@ import requests
 sys.path.insert(0, str(Path(__file__).parents[1] / "outreach"))
 
 from config import (
-    GOOGLE_SERVICE_ACCOUNT_JSON,
-    SPREADSHEET_ID,
     COL_NAME,
     COL_COMPANY,
     COL_FACEBOOK_URL,
@@ -55,6 +53,11 @@ def _serper_search(query: str, api_key: str, label: str) -> list[dict]:
         logger.warning(f"[SOCIAL] Serper request failed for {label!r}: {e}")
         return []
 
+    if resp.status_code == 402 or (resp.status_code != 200 and any(
+        k in resp.text.lower() for k in ("quota", "credit", "limit exceeded", "insufficient")
+    )):
+        from notify import alert_token_exhausted
+        alert_token_exhausted("Serper", resp.text[:200])
     if resp.status_code != 200:
         logger.warning(f"[SOCIAL] Serper {resp.status_code} for {label!r}: {resp.text[:120]}")
         return []
@@ -101,21 +104,12 @@ def run_social_url_enrichment() -> dict:
         logger.info("[SOCIAL] SERPER_API_KEY not set — skipping social URL enrichment.")
         return stats
 
-    import json
-    import gspread
-    from google.oauth2.service_account import Credentials
-
-    SCOPES = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
+    # Route Sheets I/O through the shared client (cached auth + 429 backoff)
+    # so this step reuses Phase 1's connection and survives transient quota errors.
+    from sheets_client import get_leads_raw_values, update_lead_cell
 
     try:
-        creds = Credentials.from_service_account_info(
-            json.loads(GOOGLE_SERVICE_ACCOUNT_JSON), scopes=SCOPES
-        )
-        ws = gspread.authorize(creds).open_by_key(SPREADSHEET_ID).worksheet("Leads")
-        all_values = ws.get_all_values()
+        all_values = get_leads_raw_values()
     except Exception as e:
         log_pipeline_error("social_enrichment", f"Sheets connect failed: {e}")
         logger.error(f"[SOCIAL] Sheets connect failed: {e}")
@@ -146,7 +140,7 @@ def run_social_url_enrichment() -> dict:
             if url:
                 logger.info(f"[SOCIAL] LinkedIn {name} @ {company or '?'} -> {url} (row {i})")
                 try:
-                    ws.update_cell(i, COL_LINKEDIN_URL + 1, url)
+                    update_lead_cell(i, COL_LINKEDIN_URL, url)
                     stats["li_found"] += 1
                 except Exception as e:
                     log_pipeline_error("social_enrichment", f"LI write failed row {i}: {e}")
@@ -161,7 +155,7 @@ def run_social_url_enrichment() -> dict:
             if fb_url:
                 logger.info(f"[SOCIAL] Facebook {name} @ {company or '?'} -> {fb_url} (row {i})")
                 try:
-                    ws.update_cell(i, COL_FACEBOOK_URL + 1, fb_url)
+                    update_lead_cell(i, COL_FACEBOOK_URL, fb_url)
                     stats["fb_found"] += 1
                 except Exception as e:
                     log_pipeline_error("social_enrichment", f"FB write failed row {i}: {e}")
