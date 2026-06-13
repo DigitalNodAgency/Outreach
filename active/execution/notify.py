@@ -61,7 +61,7 @@ def send_run_summary(
         f"Follow-ups staged:     {followup_staged}",
         "",
         "Enrichment results:",
-        f"  Prospeo enriched:        {enrichment_results.get('prospeo', 0)}",
+        f"  Prospeo enriched:        {enrichment_results.get('prospeo_enriched', 0)}",
         f"  Auto-deleted (no email): {enrichment_results.get('deleted', 0)}",
         f"  LinkedIn URLs found:     {social_results.get('li_found', 0)}",
         f"  LinkedIn not found:      {social_results.get('li_not_found', 0)}",
