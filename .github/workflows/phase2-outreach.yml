@@ -2,7 +2,7 @@ name: phase2-outreach
 
 on:
   schedule:
-    - cron: "0 10 * * *"   # daily 10:00 UTC
+    - cron: "17 10 * * *"   # daily 10:17 UTC (off-the-hour: GitHub drops/delays top-of-hour schedules)
   workflow_dispatch:         # manual trigger from Actions tab
 
 jobs:

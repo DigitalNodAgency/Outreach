@@ -1,8 +1,13 @@
 """
 phase1_runner.py — Phase 1 full orchestrator.
 Entry point for GitHub Actions (phase1-discovery.yml) and Windows Task Scheduler.
-Runs: source health check → Vibe ingest → Prospeo fallback →
-enrichment → follow-up staging → summary email.
+Runs: Vibe discovery (Explorium, with built-in email enrichment) →
+social URL enrichment → follow-up staging → summary email.
+
+VIBE-ONLY: Prospeo/Apify/Serper discovery + email enrichment are intentionally
+disabled. Vibe (Explorium) is the sole discovery + email source. Leads Vibe
+cannot find an email for are KEPT (not deleted) for PhantomBuster social outreach;
+Phase 2 safely skips them for email touches.
 """
 
 import logging
@@ -28,8 +33,6 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
-
-VIBE_MIN_RESULTS = 10  # fall through to Prospeo if Vibe returns fewer than this
 
 
 def main() -> int:
@@ -75,27 +78,12 @@ def main() -> int:
     else:
         logger.info("[PHASE1] No VIBE_PROSPECTING_API_KEY and no CSV. Skipping Vibe.")
 
-    # Step 2 — Prospeo fallback (if Vibe returned < VIBE_MIN_RESULTS or no CSV)
-    if vibe_stats["new_leads"] < VIBE_MIN_RESULTS:
-        logger.info(f"[PHASE1] Vibe returned < {VIBE_MIN_RESULTS}. Running Prospeo fallback.")
-        try:
-            from run_prospeo_discovery import run_prospeo_discovery
-            prospeo_stats = run_prospeo_discovery(supplement_target=25)
-            total_new += prospeo_stats["new_leads"]
-            total_dupes += prospeo_stats["dupes_skipped"]
-            logger.info(f"[PHASE1] Prospeo: {prospeo_stats}")
-        except Exception as e:
-            log_pipeline_error("prospeo_discovery", f"{type(e).__name__}: {e}")
-            logger.error(f"[PHASE1] Prospeo discovery error: {type(e).__name__}: {e}")
-
-    # Step 3 — Email enrichment (only for leads with missing emails)
-    try:
-        from enrich_sheets_emails import run_enrichment
-        enrichment_results = run_enrichment()
-        logger.info(f"[PHASE1] Enrichment: {enrichment_results}")
-    except Exception as e:
-        log_pipeline_error("enrichment", f"{type(e).__name__}: {e}")
-        logger.error(f"[PHASE1] Enrichment error (non-fatal): {type(e).__name__}: {e}")
+    # Step 2 + 3 — DISABLED (Vibe-only mode).
+    # Prospeo discovery fallback and Prospeo/Apify/Serper email enrichment are
+    # intentionally removed. Vibe (Explorium) discovers AND enriches emails in
+    # run_vibe_api_discovery._enrich_email. Leads Vibe cannot email are retained
+    # for PhantomBuster social outreach instead of being auto-deleted.
+    enrichment_results = {"mode": "vibe-only", "note": "Prospeo/Apify/Serper email enrichment disabled"}
 
     # Step 3.5 — Social URL enrichment via Serper (fills LinkedIn col K + Facebook col J)
     try:
