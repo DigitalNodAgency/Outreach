@@ -146,12 +146,12 @@ Lessons log: [active/research/lessons.md](active/research/lessons.md)
 
 ## 10. Project State and Persistent Decisions
 
-- **Last milestone:** Sheets 429 quota halt fixed + empty-env-var crash hardening (v8/v9 | 2026-06-13). Phase 2 backlog cleared (0 leads at status=new).
-- **Current focus:** PhantomBuster LinkedIn outreach LIVE (24 leads queued, native wizard). Python social outreach engine pending removal next session.
-- **Pending decisions:** None.
-- **TODO next session:** Remove Python social outreach engine (social_main.py, social_engine.py, phantombuster_client.py, social-outreach.yml) — replaced by PhantomBuster native wizard.
-- **Known issues:** None blocking. PhantomBuster session reconnected by Mohit (2026-06-09).
-- **Locked choices:** No Apify Places, Serper discovery, SerpAPI, Apify Leads Finder (retired — ~3% email yield). Social outreach = PhantomBuster native only (not Python engine).
+- **Last milestone:** Phase 1 made Vibe-only + scheduled-run reliability fixed (v10/v11 | 2026-06-15). Diagnosed missed Mon run = GitHub best-effort `schedule` delay/drop (not disabled/failing); crons moved off top-of-hour; missed run compensated via manual dispatch. Prospeo/Apify/Serper email enrichment removed (was 400-failing + auto-deleting Vibe leads).
+- **Current focus:** PhantomBuster LinkedIn outreach LIVE (native wizard). Email-less Vibe leads now retained to feed it. Python social outreach engine pending removal next session.
+- **Pending decisions:** Open PR (cron + Vibe-only) needs merge to main by Rizan/Mohit — schedules only re-register from default branch.
+- **TODO next session:** Merge the schedule/Vibe-only PR. Consider external scheduler (cron service → workflow_dispatch API) if GitHub `schedule` drift keeps missing runs. Remove Python social outreach engine (social_main.py, social_engine.py, phantombuster_client.py, social-outreach.yml).
+- **Known issues:** GitHub `schedule` events fire hours late / occasionally drop (best-effort) — inherent GitHub limitation, only fully solvable with an external trigger.
+- **Locked choices:** No Apify Places, Serper discovery, SerpAPI, Apify Leads Finder. Prospeo retired (discovery + email enrichment) — Vibe-only. Serper kept for SOCIAL URL enrichment only. Social outreach = PhantomBuster native only (not Python engine).
 
 ---
 
@@ -225,23 +225,32 @@ SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mircha
 - [v7 | 2026-06-12 | ICP region expansion approved: TX, GA, NC, TN added alongside FL. run_vibe_api_discovery.py now reads ICP_REGIONS env var dynamically (was hardcoded to us-fl). Root cause of zero new leads: Florida market saturating + filter never reading env var. Update ICP_REGIONS GitHub Actions repo variable to: Florida,Texas,Georgia,North Carolina,Tennessee,USA]
 - [v8 | 2026-06-13 | Sheets 429 quota halt fixed. Phase 2 Touch 1 aborted after ~8 leads each run (APIError 429 "Read requests per minute"), stranding the rest at status=new. Root cause in sheets_client.py: _get_sheet() re-authorized gspread + re-ran open_by_key on EVERY call, and update_lead_status re-read the whole email column per lead, with no 429 backoff. Fix: per-process cache of client/spreadsheet/worksheet handles; cached Leads email column (invalidated on append/delete); ensure_headers once per tab per run; _with_backoff() retry wrapper (429/500/503, 1s base, 3 retries); 3× update_cell per lead collapsed into one batch_update. Local run cleared the full backlog in one pass, single auth line, no 429.]
 - [v9 | 2026-06-13 | Empty-env-var crash hardening. GitHub Actions injects an UNDEFINED `${{ vars.X }}` as "" (not absent), so `int(os.getenv(key, default))` hit `int("")` → ValueError at config import → entire run (any entry point) died silently. Added _int_env/_float_env helpers in config.py (`os.getenv(key) or default`) and routed all int/float env parses through them — notably the workflow-injected FOLLOWUP_DELAY_DAYS, MAX_FOLLOWUPS (phase2/social) and MAX_LEADS_PER_RUN (phase1). Defaults now apply on empty injection instead of crashing.]
+- [v10 | 2026-06-15 | Scheduled runs moved off the top of the hour. Diagnosis (via gh run history): all workflows active and succeeding, but GitHub delivers `schedule` events best-effort and was firing the 07:00/10:00/11:00 UTC crons hours late (15:00–21:00 UTC) and dropped them entirely on Jun 15. Not a config bug. Mitigation: phase1 `0 7`→`17 7`, phase2 `0 10`→`17 10` to reduce top-of-hour contention. Compensated the missed Mon run via manual `gh workflow run`. NOTE: GitHub scheduling is inherently best-effort; for guaranteed timing an external trigger (cron service → workflow_dispatch API) is the only hard fix. GHA Phase 1 path confirmed fully headless via run_vibe_api_discovery — Section 2 "local-only" was stale.]
+- [v11 | 2026-06-15 | Phase 1 made VIBE-ONLY. Run log showed Prospeo `/enrich-person` failing 400 "Field required" on every call, the client misreading 400 as a rate-limit, and the Tier-2 delete auto-deleting 11 good email-less Vibe leads per run. Removed Step 2 (Prospeo discovery fallback) and Step 3 (enrich_sheets_emails: Prospeo/Apify/Serper + auto-delete) from phase1_runner.py. Vibe already enriches emails at discovery (Explorium contacts_information/enrich). Email-less leads now KEPT for PhantomBuster social outreach (Phase 2 skips them safely). notify.py summary updated to reflect Vibe-only. enrich_sheets_emails.py left as dead code.]
 
 ---
 
 ## 13. Discovery Hierarchy, ICP, and Two-Phase Protocol
 
-### Discovery Source Priority
-Vibe Prospecting MCP → Prospeo → Manual assist
+### Discovery Source Priority — VIBE-ONLY (v11)
+Vibe Prospecting (Explorium REST) ONLY → Manual assist.
+Prospeo discovery fallback retired. Vibe is the sole automated discovery source.
 
-### Enrichment Tiers (missing email only)
-- T0: Prospeo `/enrich-person` (requires contact name, verified)
-- T1: Apify Contact Info Scraper (100-URL chunks, 5-min timeout)
-- T2: Serper snippet + contact-page scrape (30s timeout)
-- T3: Auto-delete row if still no email
+### Email Enrichment — VIBE-ONLY (v11)
+Email enrichment happens INSIDE discovery: `run_vibe_api_discovery._enrich_email`
+calls Explorium `/prospects/contacts_information/enrich` per prospect. There is no
+separate enrichment step. Prospeo/Apify/Serper email enrichment is removed.
+- Leads Vibe cannot find an email for are KEPT (not deleted) for PhantomBuster
+  social outreach. Phase 2 skips email-less leads safely (skipped, not failed).
+- `enrich_sheets_emails.py` is no longer called by the runner (dead code, kept for ref).
 
 ### Retired Sources (never re-add)
 Apify Places, Serper discovery, SerpAPI, Apify Leads Finder.
-Root cause: return business listings without verified personal emails. Yield ~3%.
+Prospeo (discovery + email enrichment) — retired v11: `/enrich-person` returned
+400 "Field required" and the delete-tier was auto-deleting good email-less Vibe leads.
+Root cause (others): return business listings without verified personal emails. Yield ~3%.
+NOTE: Serper is STILL used for SOCIAL URL enrichment only (Step 3.5, LinkedIn/Facebook),
+never for lead discovery or email enrichment.
 
 ### ICP Configuration
 ```
