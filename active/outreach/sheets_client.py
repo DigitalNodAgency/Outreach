@@ -16,6 +16,7 @@ from gspread.exceptions import APIError
 from config import (
     GOOGLE_SERVICE_ACCOUNT_JSON, SPREADSHEET_ID,
     LEADS_HEADERS, OUTREACH_LOG_HEADERS, REPLY_LOG_HEADERS, SOCIAL_LOG_HEADERS,
+    REMOVED_EMAILS_HEADERS,
     COL_EMAIL, COL_STATUS, COL_LAST_CONTACTED, COL_FOLLOWUP_COUNT,
     COL_NAME, COL_COMPANY, COL_REGION, COL_FACEBOOK_URL, COL_LINKEDIN_URL,
     OLOG_LEAD_EMAIL, OLOG_STAGE_NUMBER,
@@ -184,6 +185,41 @@ def update_lead_cell(row_idx: int, col_zero_based: int, value: str) -> None:
     _with_backoff(ws.update_cell, row_idx, col_zero_based + 1, value)
     if col_zero_based == COL_EMAIL:
         _invalidate_leads_email_col()
+
+
+def batch_update_cells(cells: list[tuple]) -> int:
+    """Apply many single-cell writes to the Leads tab in ONE batched API call.
+    `cells` = list of (row_1based, col_0based, value). Quota-safe alternative to
+    a loop of update_cell. Invalidates the email cache if any write targets the
+    email column. Returns the number of cells written."""
+    if not cells:
+        return 0
+    ws = _get_sheet("Leads")
+    updates = [
+        {"range": gspread.utils.rowcol_to_a1(r, c + 1), "values": [[v]]}
+        for r, c, v in cells
+    ]
+    _with_backoff(ws.batch_update, updates, value_input_option="RAW")
+    if any(c == COL_EMAIL for _, c, _ in cells):
+        _invalidate_leads_email_col()
+    logger.info(f"[SHEETS] Batch updated {len(cells)} cells on Leads.")
+    return len(cells)
+
+
+def append_removed_emails(entries: list[dict]) -> int:
+    """Append BillionVerify-rejected addresses to the 'Removed Emails' audit tab.
+    Single batched write. Returns rows written."""
+    if not entries:
+        return 0
+    ws = _get_sheet("Removed Emails")
+    ensure_headers("Removed Emails", REMOVED_EMAILS_HEADERS)
+    rows = [[
+        e.get("email", ""), e.get("name", ""), e.get("company", ""),
+        e.get("bv_status", ""), e.get("bv_reason", ""), e.get("removed_date", ""),
+    ] for e in entries]
+    _with_backoff(ws.append_rows, rows, value_input_option="RAW")
+    logger.info(f"[SHEETS] Logged {len(rows)} removed emails to audit tab.")
+    return len(rows)
 
 
 def append_leads_batch(leads: list[dict]) -> int:

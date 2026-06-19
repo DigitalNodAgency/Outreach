@@ -23,8 +23,8 @@ Trigger (run_phase1.bat)
   → Pause flag check (PIPELINE_PAUSED at root)
   → Source health check (skip dead sources via source_health.json)
   → Vibe MCP export → ingest_vibe_export.py → structure → dedup → Sheets write
-  → Prospeo fallback if Vibe < 10 results → run_prospeo_discovery.py
-  → Email enrichment: Prospeo (T0) → Apify (T1) → Serper (T2) → auto-delete (T3)
+  → Email verification: BillionVerify (verify_emails_step.py) → bad emails blanked
+      + logged to "Removed Emails" tab, lead row RETAINED for social outreach
   → Follow-up staging (status/count advance only, no emails sent)
   → Phase 1 summary email (notify.py → Gmail SMTP)
 ```
@@ -147,7 +147,7 @@ Lessons log: [active/research/lessons.md](active/research/lessons.md)
 ## 10. Project State and Persistent Decisions
 
 - **Last milestone:** Phase 1 made Vibe-only + scheduled-run reliability fixed (v10/v11 | 2026-06-15). Diagnosed missed Mon run = GitHub best-effort `schedule` delay/drop (not disabled/failing); crons moved off top-of-hour; missed run compensated via manual dispatch. Prospeo/Apify/Serper email enrichment removed (was 400-failing + auto-deleting Vibe leads).
-- **Current focus:** PhantomBuster LinkedIn outreach LIVE (native wizard). Email-less Vibe leads now retained to feed it. Python social outreach engine pending removal next session.
+- **Current focus:** PhantomBuster LinkedIn outreach LIVE (native wizard). Email-less Vibe leads now retained to feed it. BillionVerify email verification added to Phase 1 (v12) — needs `BV_API_KEY` repo secret + first live run to confirm response-shape parsing. Python social outreach engine pending removal next session.
 - **Pending decisions:** Open PR (cron + Vibe-only) needs merge to main by Rizan/Mohit — schedules only re-register from default branch.
 - **TODO next session:** Merge the schedule/Vibe-only PR. Consider external scheduler (cron service → workflow_dispatch API) if GitHub `schedule` drift keeps missing runs. Remove Python social outreach engine (social_main.py, social_engine.py, phantombuster_client.py, social-outreach.yml).
 - **Known issues:** GitHub `schedule` events fire hours late / occasionally drop (best-effort) — inherent GitHub limitation, only fully solvable with an external trigger.
@@ -165,6 +165,7 @@ PROSPEO_API_KEY          Client's Prospeo key — discovery + enrichment
 APIFY_API_TOKEN          Client's Apify token — Contact Info Scraper (Tier 1)
 SERPER_API_KEY           Client's Serper key — fallback scrape (Tier 2)
 VIBE_PROSPECTING_API_KEY Client's Vibe Prospecting key — primary discovery
+BV_API_KEY               Client's BillionVerify key — email verification (Phase 1 Step 1.6). Skipped gracefully if absent.
 MAX_LEADS_PER_RUN        Discovery cap per run (default 100)
 ICP_PERSONA              Target job title(s) — set after onboarding call
 ICP_COMPANY_SIZE         Target employee range — set after onboarding call
@@ -180,6 +181,7 @@ SPREADSHEET_ID                 Client's Google Sheet ID
 PROSPEO_API_KEY                Client's Prospeo key
 VIBE_PROSPECTING_API_KEY       Client's Vibe Prospecting key
 SERPER_API_KEY                 Client's Serper key — LinkedIn URL enrichment step (Step 3.5). Skipped gracefully if absent.
+BV_API_KEY                     Client's BillionVerify key — email verification (Step 1.6). Skipped gracefully if absent.
 GMAIL_SENDER                   Client's Gmail address for operator alerts
 GMAIL_APP_PASSWORD             Client's Gmail App Password
 NOTIFY_EMAIL                   Client's email for summary reports
@@ -226,6 +228,7 @@ SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mircha
 - [v8 | 2026-06-13 | Sheets 429 quota halt fixed. Phase 2 Touch 1 aborted after ~8 leads each run (APIError 429 "Read requests per minute"), stranding the rest at status=new. Root cause in sheets_client.py: _get_sheet() re-authorized gspread + re-ran open_by_key on EVERY call, and update_lead_status re-read the whole email column per lead, with no 429 backoff. Fix: per-process cache of client/spreadsheet/worksheet handles; cached Leads email column (invalidated on append/delete); ensure_headers once per tab per run; _with_backoff() retry wrapper (429/500/503, 1s base, 3 retries); 3× update_cell per lead collapsed into one batch_update. Local run cleared the full backlog in one pass, single auth line, no 429.]
 - [v9 | 2026-06-13 | Empty-env-var crash hardening. GitHub Actions injects an UNDEFINED `${{ vars.X }}` as "" (not absent), so `int(os.getenv(key, default))` hit `int("")` → ValueError at config import → entire run (any entry point) died silently. Added _int_env/_float_env helpers in config.py (`os.getenv(key) or default`) and routed all int/float env parses through them — notably the workflow-injected FOLLOWUP_DELAY_DAYS, MAX_FOLLOWUPS (phase2/social) and MAX_LEADS_PER_RUN (phase1). Defaults now apply on empty injection instead of crashing.]
 - [v10 | 2026-06-15 | Scheduled runs moved off the top of the hour. Diagnosis (via gh run history): all workflows active and succeeding, but GitHub delivers `schedule` events best-effort and was firing the 07:00/10:00/11:00 UTC crons hours late (15:00–21:00 UTC) and dropped them entirely on Jun 15. Not a config bug. Mitigation: phase1 `0 7`→`17 7`, phase2 `0 10`→`17 10` to reduce top-of-hour contention. Compensated the missed Mon run via manual `gh workflow run`. NOTE: GitHub scheduling is inherently best-effort; for guaranteed timing an external trigger (cron service → workflow_dispatch API) is the only hard fix. GHA Phase 1 path confirmed fully headless via run_vibe_api_discovery — Section 2 "local-only" was stale.]
+- [v12 | 2026-06-19 | BillionVerify email verification added to Phase 1 (Step 1.6). New `billionverify_client.py` (bulk endpoint, chunked 100/call, 401/402/429 handling, key never logged) + `verify_emails_step.py` (Sheets path `run_email_verification` + CSV path `verify_csv`). Wired into `phase1_runner.py` after Vibe ingest, before social enrichment; summary email gained a verification block. Sheets behavior: valid/catchall/role KEPT (flagged in notes `bv:<status>`); invalid/risky/disposable/unknown → email BLANKED (only for uncontacted leads) + logged to new "Removed Emails" audit tab, but lead ROW RETAINED for PhantomBuster social outreach (honors v11 retention rule). Idempotent + credit-safe: skips leads already `bv:`-flagged; soft-skips entirely if BV_API_KEY unset (like Serper). Added `BV_API_KEY` to config + phase1-discovery.yml secrets. Added `VERIFY_EMAILS.md` drop-in agent spec at root (manual trigger / CSV). NOTE: written against the BillionVerify v1 spec; response-shape parsing is defensive — verify field names on first live run.]
 - [v11 | 2026-06-15 | Phase 1 made VIBE-ONLY. Run log showed Prospeo `/enrich-person` failing 400 "Field required" on every call, the client misreading 400 as a rate-limit, and the Tier-2 delete auto-deleting 11 good email-less Vibe leads per run. Removed Step 2 (Prospeo discovery fallback) and Step 3 (enrich_sheets_emails: Prospeo/Apify/Serper + auto-delete) from phase1_runner.py. Vibe already enriches emails at discovery (Explorium contacts_information/enrich). Email-less leads now KEPT for PhantomBuster social outreach (Phase 2 skips them safely). notify.py summary updated to reflect Vibe-only. enrich_sheets_emails.py left as dead code.]
 
 ---

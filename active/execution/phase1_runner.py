@@ -46,6 +46,7 @@ def main() -> int:
     total_new = 0
     total_dupes = 0
     enrichment_results = {}
+    verify_results = {}
     social_results = {}
     followup_staged = 0
 
@@ -85,6 +86,17 @@ def main() -> int:
     # for PhantomBuster social outreach instead of being auto-deleted.
     enrichment_results = {"mode": "vibe-only", "note": "Prospeo/Apify/Serper email enrichment disabled"}
 
+    # Step 1.6 — Email verification (BillionVerify) on Sheets emails.
+    # KEEP valid/catchall/role; bad emails are blanked + audited but the lead row
+    # is RETAINED for PhantomBuster social outreach. Skipped if BV_API_KEY unset.
+    try:
+        from verify_emails_step import run_email_verification
+        verify_results = run_email_verification()
+        logger.info(f"[PHASE1] Email verification: {verify_results}")
+    except Exception as e:
+        log_pipeline_error("email_verification", f"{type(e).__name__}: {e}")
+        logger.error(f"[PHASE1] Email verification error (non-fatal): {type(e).__name__}: {e}")
+
     # Step 3.5 — Social URL enrichment via Serper (fills LinkedIn col K + Facebook col J)
     try:
         from enrich_linkedin_step import run_social_url_enrichment
@@ -111,6 +123,7 @@ def main() -> int:
             new_leads=total_new,
             dupes_skipped=total_dupes,
             enrichment_results=enrichment_results,
+            verify_results=verify_results,
             social_results=social_results,
             followup_staged=followup_staged,
             errors=errors,
