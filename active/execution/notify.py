@@ -42,6 +42,7 @@ def send_run_summary(
     new_leads: int = 0,
     dupes_skipped: int = 0,
     enrichment_results: dict = None,
+    verify_results: dict = None,
     social_results: dict = None,
     followup_staged: int = 0,
     errors: list[str] = None,
@@ -49,6 +50,7 @@ def send_run_summary(
     """Phase 1 summary email to operator."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     enrichment_results = enrichment_results or {}
+    verify_results = verify_results or {}
     social_results = social_results or {}
     errors = errors or []
 
@@ -68,6 +70,23 @@ def send_run_summary(
         f"  Facebook URLs found:     {social_results.get('fb_found', 0)}",
         f"  Facebook not found:      {social_results.get('fb_not_found', 0)}",
     ]
+
+    # Email verification block (BillionVerify) — only shown when the step ran.
+    lines += ["", "Email verification (BillionVerify):"]
+    if verify_results.get("skipped"):
+        lines.append(f"  Skipped: {verify_results.get('reason', 'n/a')}")
+    elif not verify_results:
+        lines.append("  Not run.")
+    else:
+        by_status = verify_results.get("by_status", {})
+        status_str = ", ".join(f"{k}={v}" for k, v in sorted(by_status.items())) or "—"
+        lines += [
+            f"  Verified:                {verify_results.get('verified', 0)}",
+            f"  Kept (valid/catchall/role): {verify_results.get('kept', 0)}",
+            f"  Removed (email blanked):  {verify_results.get('removed', 0)}",
+            f"  Breakdown:               {status_str}",
+            f"  Credits before run:      {verify_results.get('credits_before', 'unknown')}",
+        ]
 
     if errors:
         lines += ["", f"Errors ({len(errors)}):"]

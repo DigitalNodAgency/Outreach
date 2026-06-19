@@ -37,6 +37,11 @@ def _float_env(key: str, default: float) -> float:
 SPREADSHEET_ID = _require("SPREADSHEET_ID")
 GOOGLE_SERVICE_ACCOUNT_JSON = _require("GOOGLE_SERVICE_ACCOUNT_JSON")
 
+# ── BillionVerify (email verification, Phase 1) ────────────────────────────────
+# Soft dependency: if BV_API_KEY is unset the verification step is skipped
+# gracefully (mirrors the Serper social-enrichment soft-dependency).
+BV_API_KEY = os.getenv("BV_API_KEY", "").strip()
+
 # ── Brevo SMTP ─────────────────────────────────────────────────────────────────
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp-relay.brevo.com")
 SMTP_PORT = _int_env("SMTP_PORT", 587)
@@ -107,6 +112,11 @@ REPLY_LOG_HEADERS = [
 # Social log tab
 SOCIAL_LOG_HEADERS = [
     "lead_email", "lead_name", "platform", "profile_url", "sent_date", "status", "notes", "touch_number"
+]
+
+# Removed Emails tab — audit trail for BillionVerify-rejected addresses.
+REMOVED_EMAILS_HEADERS = [
+    "email", "name", "company", "bv_status", "bv_reason", "removed_date"
 ]
 
 # ── Region → template series routing ──────────────────────────────────────────
