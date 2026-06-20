@@ -2,12 +2,12 @@
 
 Hi {{name}},
 
-77% of B2B buyers read reviews before they ever reach out, and a prospect deciding whether to hire your agency does exactly that: Googles your name, scans your reviews, checks what's on page one.
+77% of B2B buyers check reviews before reaching out, and a prospect deciding on your agency does the same: Googles you, scans your reviews, checks page one.
 
-A bad review or an old client dispute ranking high enough loses you the pitch before the call happens. It cuts both ways too, agencies showing up with press mentions and a clean profile close faster against the ones who don't.
+A bad review or an old client dispute ranking there loses you pitches you never even hear about.
 
-We help marketing and social media agencies remove Google reviews that violate platform policy, suppress negative URLs ranking for your name, and land guaranteed PR placements you can put straight on your site and in proposals. Most clients see results within 7 days.
+We help marketing agencies remove policy-violating reviews, suppress negative URLs, and land guaranteed PR placements for your site and proposals. Most clients see results in 7 days.
 
-Reply "Consult" and I'll set up a free 20-minute call.
+Reply "Consult" for a free 20-minute call.
 
 {{sender_name}}
