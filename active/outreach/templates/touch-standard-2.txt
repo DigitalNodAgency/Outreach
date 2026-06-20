@@ -1,11 +1,11 @@
-Re: 70% of your next customers just clicked away
+Re: 77% of your next client already checked your reviews
 
 Hi {{name}},
 
-I pulled up your business on Google this morning and spotted at least 5 reviews that look removable under Google's policies on page one — that's likely costing you calls.
+I pulled up your agency's Google Business Profile this morning and found a handful of reviews that look removable under platform policy, exactly what a prospect sees before they ever fill out your contact form.
 
-Still happy to schedule a free consultation call. Just reply "Consult" and I'll schedule it at the earliest.
+Still happy to set up that free consultation. Reply "Consult" and I'll get it on the calendar.
 
-If reputation isn't a priority right now, no worries — just let me know and I'll stop reaching out.
+If reputation isn't a priority right now, no worries, just say so and I'll stop reaching out.
 
 {{sender_name}}

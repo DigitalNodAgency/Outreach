@@ -7,6 +7,7 @@
 ## 1. Project Identity
 
 **What it does:** Two-phase autonomous B2B lead pipeline. Phase 1 handles discovery, structuring, deduplication, and enrichment on a local Windows schedule. Phase 2 handles outreach sequencing, follow-up automation, and Brevo reconciliation via GitHub Actions.
+**Target / Offer (v13 pivot):** US social-media & digital-marketing agencies. Offer = guaranteed PR placements + reputation management (remove policy-violating Google reviews, suppress negative URLs ranking for the agency's brand). Previously HVAC companies in FL/TX/GA/NC/TN.
 **Success metric:** Qualified leads with verified emails reaching `status=outreach_sent` within 24 hours of discovery, with zero duplicate sends and accurate Brevo reconciliation on every run.
 **Stack:** Python 3.11, Google Sheets API, Brevo SMTP + API, GitHub Actions, Windows Task Scheduler, Vibe Prospecting MCP, Prospeo API, Apify Contact Info Scraper, Serper API, Gmail SMTP, PhantomBuster (Facebook + LinkedIn social outreach)
 **Type:** Freelance Deliverable / AI Agent
@@ -147,8 +148,8 @@ Lessons log: [active/research/lessons.md](active/research/lessons.md)
 ## 10. Project State and Persistent Decisions
 
 - **Last milestone:** Phase 1 made Vibe-only + scheduled-run reliability fixed (v10/v11 | 2026-06-15). Diagnosed missed Mon run = GitHub best-effort `schedule` delay/drop (not disabled/failing); crons moved off top-of-hour; missed run compensated via manual dispatch. Prospeo/Apify/Serper email enrichment removed (was 400-failing + auto-deleting Vibe leads).
-- **Current focus:** PhantomBuster LinkedIn outreach LIVE (native wizard). Email-less Vibe leads now retained to feed it. BillionVerify email verification added to Phase 1 (v12) — needs `BV_API_KEY` repo secret + first live run to confirm response-shape parsing. Python social outreach engine pending removal next session.
-- **Pending decisions:** Open PR (cron + Vibe-only) needs merge to main by Rizan/Mohit — schedules only re-register from default branch.
+- **Current focus:** NICHE PIVOT (v13 | 2026-06-20). Target HVAC → US social/digital marketing agencies; offer → guaranteed PR placements + reputation management. All outreach copy rewritten (4-touch email sequence + breakup, social templates), touch count now fully `MAX_FOLLOWUPS`-driven (no hardcoded caps), CLAUDE.md ICP updated. Live Google Sheet reset to a single Rizan QA lead (himurakenshin096@gmail.com, status=new) so a Phase 2 run sends the new sequence to Rizan's inbox. NOTE: Phase 1/2/reply-logger schedules are currently PAUSED (commented out, pre-existing makeover WIP) — the QA send needs a manual `phase2-outreach` workflow_dispatch, or re-enabling the schedules (which only re-register from main after merge). BillionVerify (v12) still pending first live field-shape confirmation.
+- **Pending decisions:** (1) Rizan/Mohit set the new GitHub repo variables before discovery flips to agencies: `MAX_FOLLOWUPS=4`, `ICP_PERSONA`, `ICP_COMPANY_SIZE`, `ICP_INDUSTRIES`, `ICP_REGIONS`, `ICP_DISQUALIFY` (values in Section 13). (2) Add CAN-SPAM footer to the sending account. (3) Merge the v13 makeover PR. Prior open PR (cron + Vibe-only) still needs merge to main — schedules only re-register from default branch.
 - **TODO next session:** Merge the schedule/Vibe-only PR. Consider external scheduler (cron service → workflow_dispatch API) if GitHub `schedule` drift keeps missing runs. Remove Python social outreach engine (social_main.py, social_engine.py, phantombuster_client.py, social-outreach.yml).
 - **Known issues:** GitHub `schedule` events fire hours late / occasionally drop (best-effort) — inherent GitHub limitation, only fully solvable with an external trigger.
 - **Locked choices:** No Apify Places, Serper discovery, SerpAPI, Apify Leads Finder. Prospeo retired (discovery + email enrichment) — Vibe-only. Serper kept for SOCIAL URL enrichment only. Social outreach = PhantomBuster native only (not Python engine).
@@ -208,7 +209,9 @@ PHANTOMBUSTER_LI_SESSION_COOKIE LinkedIn session cookie — required to activate
 ### Phase 2 — GitHub repo variables (non-secret)
 ```
 FOLLOWUP_DELAY_DAYS    Days between touches (default 4)
-MAX_FOLLOWUPS          Max touches per lead (default 3)
+MAX_FOLLOWUPS          Total touches per lead (default 4). = highest touch-standard-{N}.txt.
+                       Raising it only needs a matching template file; a missing file ends
+                       the sequence gracefully (engine closes the lead, no failed sends).
 CALENDLY_URL           Client's Calendly booking link injected into templates
 SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mirchandani)
 ```
@@ -218,6 +221,7 @@ SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mircha
 ## 12. Improvement Log
 > Format: [vN | YYYY-MM-DD | description]
 
+- [v13 | 2026-06-20 | NICHE PIVOT: HVAC → US social/digital marketing agencies; offer → guaranteed PR placements + reputation management (remove policy-violating Google reviews, suppress negative URLs). All outreach copy rewritten from the Digital Nod draft: email touch-standard-1..3 reworked + NEW touch-standard-4 breakup ("closing the loop"); social-linkedin-1..3 + social-facebook-1 reworked. Draft's unsupported tokens remapped — `{{Agency Name}}`→`{{company}}`/"your agency's", `{{number}}` dropped, Touch 3 = Version B (no invented numbers); only `{{name}}/{{company}}/{{calendly_url}}/{{sender_name}}` survive. Touch count made fully `MAX_FOLLOWUPS`-driven: de-hardcoded `>=3`/`<3` in sheets_client.advance_followup_staging, config default 3→4, brevo_reconcile breakup→`str(MAX_FOLLOWUPS)`; outreach_engine now CLOSES a lead (not fails) when the next touch template is missing, so MAX_FOLLOWUPS can exceed templates safely (effective ceiling = min(var, files on disk)). ICP block + env docs + SCHEMA stage_number updated. Live Sheet reset (scripts/seed_test_lead.py): backed up then wiped Leads + log/audit tabs to one Rizan QA lead. Action items for client: set repo vars MAX_FOLLOWUPS=4 + ICP_* (Section 13), add CAN-SPAM footer to sender. UPDATE_FOR_MOHIT.md drafted at root.]
 - [v1 | 2026-05-17 | Initial project restructure to spec layout. Flat-root → active/ hierarchy. Absolute file paths in config. Log files routed to logs/.]
 - [v2 | 2026-05-21 | Social outreach added: PhantomBuster Facebook + LinkedIn via social-outreach.yml (manual dispatch). Leads sheet col K = linkedin_url. Instagram replaced by LinkedIn throughout.]
 - [v3 | 2026-05-23 | Switched Vibe discovery from MCP export-to-csv to direct Explorium REST API (api.explorium.ai/v1). Root cause: export-to-csv returns a portal URL (app.vibeprospecting.ai/lists), not a programmable download endpoint. REST API requires mode:"full" at root and all filters nested under "filters" key. Removed has_email filter to allow name-only leads through to the enrichment tier (Prospeo T0).]
@@ -255,22 +259,31 @@ Root cause (others): return business listings without verified personal emails. 
 NOTE: Serper is STILL used for SOCIAL URL enrichment only (Step 3.5, LinkedIn/Facebook),
 never for lead discovery or email enrichment.
 
-### ICP Configuration
+### ICP Configuration (v13 — agency pivot)
+> These are the canonical values. Discovery only changes once the matching GitHub repo
+> variables are updated (Rizan/Mohit) — editing this doc alone does not redirect sourcing.
 ```
-ICP_PERSONA     = HVAC company owner,founder,CEO,director,Head of Marketing,CMO
-ICP_COMPANY_SIZE= 10-50,50-200
-ICP_INDUSTRIES  = HVAC,Heating Ventilation and Air Conditioning
-ICP_REGIONS     = Florida,Texas,Georgia,North Carolina,Tennessee,USA
-ICP_DISQUALIFY  = Any company outside the HVAC industry or outside Florida, Texas, Georgia, North Carolina, Tennessee
+ICP_PERSONA     = agency owner,founder,CEO,managing director,partner,head of growth
+ICP_COMPANY_SIZE= 2-10,10-50
+ICP_INDUSTRIES  = Marketing & Advertising,Marketing Services,Advertising Services,Digital Marketing,Social Media Marketing,Public Relations & Communications
+ICP_REGIONS     = USA
+ICP_DISQUALIFY  = Not a marketing/advertising/digital/social-media agency; in-house marketing teams; companies outside the US
 DAILY_EMAIL_CAP = 300
 MAX_LEADS_PER_RUN = 100
 ```
+> Industry/persona strings are tuned to the Explorium taxonomy on the first live discovery run.
+> Prior HVAC ICP (retired v13): persona HVAC owner/founder/CEO; industries HVAC; regions FL,TX,GA,NC,TN,USA.
 
-### Outreach Sequence
-- Series A: `[CLIENT_REGION_SERIES_A]` → `[CLIENT_TEMPLATE_PREFIX_A]-{1,2,3}.txt`
-- Series B: `[CLIENT_REGION_SERIES_B]` → `[CLIENT_TEMPLATE_PREFIX_B]-{1,2,3}.txt`
+### Outreach Sequence (v13 — 4-touch, agency/PR copy)
+- Email series: `touch-standard-{1..MAX_FOLLOWUPS}.txt` (currently 1-4; Touch 4 = breakup
+  "closing the loop"). Touches 2-4 thread off Touch 1 via `Re:` subject.
+- Sequence length is driven entirely by the `MAX_FOLLOWUPS` repo variable — no hardcoded caps.
+  Touches 2-N share the same `Re:` subject; only Touch 1's subject is unique.
+- Social series (PhantomBuster/Python reference copy): `social-linkedin-{1,2,3}.txt` + `social-facebook-1.txt`.
+- Supported template tokens (email engine): `{{name}}`, `{{company}}`, `{{calendly_url}}`, `{{sender_name}}`.
+  Social engine substitutes only `{{name}}` + `{{sender_name}}` (keep Calendly as a literal link there).
 - Templates live in: `active/outreach/templates/`
-- Region → prefix routing defined in `config.py → REGION_TEMPLATE_MAP`
+- All US leads route to the `touch-standard` series via `config.py → REGION_TEMPLATE_MAP` (default prefix).
 
 ### Pipeline Pause / Resume
 - Phase 1: create `PIPELINE_PAUSED` file at repo root → runner exits gracefully.

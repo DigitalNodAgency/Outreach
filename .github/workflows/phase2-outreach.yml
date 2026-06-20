@@ -1,8 +1,9 @@
 name: phase2-outreach
 
 on:
-  schedule:
-    - cron: "17 10 * * *"   # daily 10:17 UTC (off-the-hour: GitHub drops/delays top-of-hour schedules)
+  # PAUSED — total makeover in progress. Re-enable schedule when ready.
+  # schedule:
+  #   - cron: "17 10 * * *"   # daily 10:17 UTC
   workflow_dispatch:         # manual trigger from Actions tab
 
 jobs:

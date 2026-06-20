@@ -6,7 +6,7 @@ Handles daily cap enforcement, per-session health tracking, and send logging.
 import logging
 import smtplib
 import time
-from email.mime.multipart import MIMEMultipart
+from datetime import date
 from email.mime.text import MIMEText
 from dataclasses import dataclass, field
 
@@ -14,6 +14,7 @@ from config import (
     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM,
     DAILY_EMAIL_CAP, SEND_DELAY_SECONDS,
     SMTP_HEALTH_MIN_SENDS, SMTP_HEALTH_FAIL_THRESHOLD,
+    WARMUP_START_DATE, WARMUP_STEP_DAYS, WARMUP_SCHEDULE,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,12 +59,32 @@ def reset_session() -> None:
     _session = SMTPSession()
 
 
+def effective_daily_cap() -> int:
+    """Today's send cap. During the warm-up window the cap follows WARMUP_SCHEDULE
+    (one rung per WARMUP_STEP_DAYS days), never exceeding DAILY_EMAIL_CAP. Once the
+    schedule is exhausted — or no warm-up is configured — it's just DAILY_EMAIL_CAP."""
+    if not WARMUP_START_DATE or not WARMUP_SCHEDULE:
+        return DAILY_EMAIL_CAP
+    try:
+        start = date.fromisoformat(WARMUP_START_DATE)
+    except ValueError:
+        logger.warning(f"[SMTP] Invalid WARMUP_START_DATE '{WARMUP_START_DATE}'; warm-up ramp ignored.")
+        return DAILY_EMAIL_CAP
+    days_in = (date.today() - start).days
+    idx = days_in // max(1, WARMUP_STEP_DAYS)
+    if idx < 0:
+        idx = 0  # start date in the future — stay on the first (most conservative) rung
+    if idx >= len(WARMUP_SCHEDULE):
+        return DAILY_EMAIL_CAP
+    return min(WARMUP_SCHEDULE[idx], DAILY_EMAIL_CAP)
+
+
 def cap_remaining() -> int:
-    return max(0, DAILY_EMAIL_CAP - _session.sends_today)
+    return max(0, effective_daily_cap() - _session.sends_today)
 
 
 def is_cap_hit() -> bool:
-    return _session.sends_today >= DAILY_EMAIL_CAP
+    return _session.sends_today >= effective_daily_cap()
 
 
 def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> bool:
@@ -74,7 +95,7 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> b
     Applies SEND_DELAY_SECONDS after each send.
     """
     if is_cap_hit():
-        logger.warning(f"[SMTP] Daily cap of {DAILY_EMAIL_CAP} hit. Skipping send to {to_email}.")
+        logger.warning(f"[SMTP] Daily cap of {effective_daily_cap()} hit. Skipping send to {to_email}.")
         _session.cap_hit = True
         return False
 
@@ -82,12 +103,14 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> b
         logger.error(f"[SMTP] Health degraded. Refusing send to {to_email}.")
         return False
 
-    msg = MIMEMultipart("alternative")
+    # Plain-text only: with no HTML part Brevo cannot inject an open-tracking pixel,
+    # and there are no HTML links to rewrite for click tracking — both hurt cold-email
+    # inbox placement. (Also disable account-level link/open tracking in the Brevo
+    # dashboard for the fullest effect.)
+    msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = f"{from_name} <{SMTP_FROM}>" if from_name else SMTP_FROM
     msg["To"] = to_email
-
-    msg.attach(MIMEText(body, "plain"))
 
     if not SMTP_USER or not SMTP_PASS or not SMTP_FROM:
         err = f"SMTP_USER, SMTP_PASS, or SMTP_FROM is empty — set all three GitHub Secrets."

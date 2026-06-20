@@ -1,0 +1,9 @@
+closing the loop
+
+Hi {{name}},
+
+Haven't heard back, so I'll assume your online reputation isn't a priority right now. No hard feelings.
+
+If that changes, this thread's open whenever you want to pick it back up.
+
+{{sender_name}}

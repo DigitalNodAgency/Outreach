@@ -1,3 +1,3 @@
-Hey {{name}}, hope things are going well at {{company}}! I work with HVAC owners in Florida on building steadier lead flow through the slow months. Happy to share what's been working for a few businesses nearby if you're open to a quick chat.
+Hey {{name}}, hope things are going well at {{company}}! I work with marketing and social media agencies on their online reputation, removing policy-violating Google reviews and landing guaranteed PR placements for their own brand. Happy to share what's been working for a few agencies if you're open to a quick chat.
 
-— {{sender_name}}
+{{sender_name}}

@@ -21,6 +21,7 @@ from config import (
     COL_NAME, COL_COMPANY, COL_REGION, COL_FACEBOOK_URL, COL_LINKEDIN_URL,
     OLOG_LEAD_EMAIL, OLOG_STAGE_NUMBER,
     STATUS_NEW, STATUS_FAILED,
+    MAX_FOLLOWUPS,
 )
 
 logger = logging.getLogger(__name__)
@@ -362,7 +363,7 @@ def advance_followup_staging(delay_days: int) -> list[dict]:
 
         if status not in ("outreach_sent", "followup_sent"):
             continue
-        if followup_count >= 3:
+        if followup_count >= MAX_FOLLOWUPS:
             continue
         if not last_contacted_str:
             continue
@@ -375,7 +376,7 @@ def advance_followup_staging(delay_days: int) -> list[dict]:
         if last_contacted <= cutoff:
             email = lead.get("email", "").strip().lower()
             new_count = followup_count + 1
-            new_status = "followup_sent" if new_count < 3 else "closed"
+            new_status = "followup_sent" if new_count < MAX_FOLLOWUPS else "closed"
 
             for i, e in enumerate(emails[1:], start=2):
                 if e.strip().lower() == email:

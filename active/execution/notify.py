@@ -120,7 +120,7 @@ def send_outreach_summary(
         f"Run time: {now}",
         "",
         f"Touch 1 (initial) sent:   {initial_sent}",
-        f"Touch 2/3 (follow-up) sent: {followup_sent}",
+        f"Follow-up (Touch 2+) sent: {followup_sent}",
         f"Failed sends:             {failed}",
         f"Daily cap hit:            {'YES' if cap_hit else 'no'}",
         f"SMTP health degraded:     {'YES — CHECK IMMEDIATELY' if health_degraded else 'no'}",

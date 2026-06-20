@@ -58,10 +58,27 @@ NOTIFY_EMAIL = _require("NOTIFY_EMAIL")
 # ── Outreach limits ────────────────────────────────────────────────────────────
 DAILY_EMAIL_CAP = _int_env("DAILY_EMAIL_CAP", 300)
 FOLLOWUP_DELAY_DAYS = _int_env("FOLLOWUP_DELAY_DAYS", 3)
-MAX_FOLLOWUPS = _int_env("MAX_FOLLOWUPS", 3)
+# Total touches per lead = highest touch-standard-{N}.txt. Touch 1 counts as
+# followup_count=1, so MAX_FOLLOWUPS=4 ⇒ touches 1-4 (Touch 4 = breakup).
+# GitHub repo variable overrides this default. Raising it only needs a matching
+# touch-standard-{N}.txt; a missing file ends the sequence gracefully (engine closes the lead).
+MAX_FOLLOWUPS = _int_env("MAX_FOLLOWUPS", 4)
 SEND_DELAY_SECONDS = _float_env("SEND_DELAY_SECONDS", 5)
 SMTP_HEALTH_MIN_SENDS = _int_env("SMTP_HEALTH_MIN_SENDS", 5)
 SMTP_HEALTH_FAIL_THRESHOLD = _float_env("SMTP_HEALTH_FAIL_THRESHOLD", 0.5)
+
+# ── Cold-send warm-up ramp ─────────────────────────────────────────────────────
+# Protects domain reputation by ramping the daily send cap up gradually, then
+# settling at DAILY_EMAIL_CAP. The ramp is OFF (effective cap == DAILY_EMAIL_CAP)
+# unless WARMUP_START_DATE is set to an ISO date (yyyy-mm-dd). WARMUP_SCHEDULE is
+# the per-rung daily limit; each rung lasts WARMUP_STEP_DAYS days. All env-
+# overridable so the numbers track repo variables, never hardcoded at the call site.
+WARMUP_START_DATE = os.getenv("WARMUP_START_DATE", "").strip()
+WARMUP_STEP_DAYS = _int_env("WARMUP_STEP_DAYS", 7)
+WARMUP_SCHEDULE = [
+    int(x) for x in (os.getenv("WARMUP_SCHEDULE") or "25,50,100,200").split(",")
+    if x.strip().isdigit()
+]
 
 # ── Landing page / booking ─────────────────────────────────────────────────────
 CALENDLY_URL = os.getenv("CALENDLY_URL", "")
@@ -120,14 +137,13 @@ REMOVED_EMAILS_HEADERS = [
 ]
 
 # ── Region → template series routing ──────────────────────────────────────────
-# Format: region_value_in_sheet (lowercase) → template prefix
+# Format: region_value_in_sheet (lowercase) → template prefix.
+# Client targets the USA only, so every region routes to the standard US series.
+# Sheet region values are state/country names (e.g. "FLORIDA", "USA"); any value
+# not listed here falls back to DEFAULT_TEMPLATE_PREFIX in _resolve_template_prefix.
 REGION_TEMPLATE_MAP = {
-    "au": "touch-aunz",
-    "nz": "touch-aunz",
     "us": "touch-standard",
-    "uk": "touch-standard",
-    "ca": "touch-standard",
-    "ie": "touch-standard",
+    "usa": "touch-standard",
 }
 DEFAULT_TEMPLATE_PREFIX = "touch-standard"
 

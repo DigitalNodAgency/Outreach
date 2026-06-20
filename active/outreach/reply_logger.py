@@ -15,12 +15,19 @@ from email.header import decode_header
 
 logger = logging.getLogger(__name__)
 
+from config import FOLLOWUP_DELAY_DAYS
+
 IMAP_HOST = os.getenv("IMAP_HOST", "imap.gmail.com")
-IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
+IMAP_PORT = int(os.getenv("IMAP_PORT") or "993")
 IMAP_USER = os.getenv("IMAP_USER", os.getenv("GMAIL_SENDER", ""))
 IMAP_PASS = os.getenv("IMAP_PASS", os.getenv("SMTP_PASS", ""))
 POLL_FOLDER = os.getenv("IMAP_FOLDER", "INBOX")
-POLL_DAYS_BACK = int(os.getenv("REPLY_POLL_DAYS_BACK", "3"))
+# Poll one day past the configured follow-up gap so any reply that arrived anywhere
+# within it always halts the sequence before the next touch. Derived from the repo's
+# FOLLOWUP_DELAY_DAYS variable (not hardcoded). `or` guards an empty-string env
+# injection (v9 lesson).
+_DEFAULT_POLL_DAYS = FOLLOWUP_DELAY_DAYS + 1
+POLL_DAYS_BACK = int(os.getenv("REPLY_POLL_DAYS_BACK") or _DEFAULT_POLL_DAYS)
 
 
 def _decode_header_value(raw: str) -> str:
