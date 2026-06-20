@@ -39,6 +39,32 @@ _CREDIT_KEYWORDS = ("credit", "quota", "limit exceeded", "insufficient", "out of
 
 # ── ICP → Explorium filter mappers ────────────────────────────────────────────
 
+# The Explorium `company_region_country_code` filter only accepts region codes
+# (e.g. us-ca), NOT a bare country code ("us" → 422). So a nationwide ICP must
+# be expanded to every US state/territory region code.
+_US_STATE_CODES = [
+    "us-al", "us-ak", "us-az", "us-ar", "us-ca", "us-co", "us-ct", "us-de",
+    "us-fl", "us-ga", "us-hi", "us-id", "us-il", "us-in", "us-ia", "us-ks",
+    "us-ky", "us-la", "us-me", "us-md", "us-ma", "us-mi", "us-mn", "us-ms",
+    "us-mo", "us-mt", "us-ne", "us-nv", "us-nh", "us-nj", "us-nm", "us-ny",
+    "us-nc", "us-nd", "us-oh", "us-ok", "us-or", "us-pa", "us-ri", "us-sc",
+    "us-sd", "us-tn", "us-tx", "us-ut", "us-vt", "us-va", "us-wa", "us-wv",
+    "us-wi", "us-wy", "us-dc",
+]
+
+# Country-level token (lowercase) → expands to all US region codes.
+# Lets ICP_REGIONS="USA" target the whole country instead of silently
+# falling back to a single state.
+_COUNTRY_REGION_EXPANSION = {
+    "usa": _US_STATE_CODES,
+    "us": _US_STATE_CODES,
+    "u.s.": _US_STATE_CODES,
+    "u.s.a.": _US_STATE_CODES,
+    "united states": _US_STATE_CODES,
+    "united states of america": _US_STATE_CODES,
+    "america": _US_STATE_CODES,
+}
+
 # State name (lowercase) → Explorium region code
 _STATE_CODE_MAP = {
     "florida": "us-fl",
@@ -91,8 +117,24 @@ _EXPLORIUM_SIZE_BUCKETS = [
     ("1001-5000", 1001, 5000),
 ]
 
-# Industry keyword (lowercase) → NAICS codes
+# Industry keyword (lowercase) → NAICS codes.
+# Matched as a substring against the lowercased ICP_INDUSTRIES string, so a
+# single ICP_INDUSTRIES entry can match several keywords; all matched NAICS
+# codes are unioned.
 _INDUSTRY_TO_NAICS = {
+    # Marketing / advertising / PR agencies (v13 agency pivot). Codes verified
+    # against the live Explorium naics_category taxonomy.
+    "marketing": ["541810", "541820", "541613", "541890"],
+    "advertising": ["541810", "541890", "541830"],
+    "digital marketing": ["541613", "541810", "541890"],
+    "social media": ["541613", "541810", "541890"],
+    "public relations": ["541820"],
+    "communications": ["541820"],
+    "media buying": ["541830"],
+    "branding": ["541810"],
+    "creative agency": ["541810"],
+    "design agency": ["541810"],
+    # HVAC / home services (retired ICP — kept so old configs still resolve)
     "hvac": ["238220"],
     "heating ventilation": ["238220"],
     "heating and cooling": ["238220"],
@@ -112,16 +154,31 @@ _INDUSTRY_TO_NAICS = {
 
 
 def _build_region_codes() -> list[str]:
-    """Parse ICP_REGIONS env var into Explorium region codes. Falls back to us-fl."""
+    """Parse ICP_REGIONS env var into Explorium company_region_country_code values.
+
+    Accepts country-level tokens (USA / United States → 'us') and US state names
+    (→ us-xx region codes). Returns [] on unset/unrecognized input so the caller
+    omits the region filter entirely — never silently reverts to a single state."""
     raw = ICP_REGIONS.strip()
     if not raw or raw.startswith("["):
-        return ["us-fl"]
-    codes = []
+        logger.warning("[VIBE API] ICP_REGIONS unset/placeholder; region filter omitted.")
+        return []
+    codes: list[str] = []
     for token in raw.split(","):
         name = token.strip().lower()
-        if name in _STATE_CODE_MAP:
+        if not name:
+            continue
+        if name in _COUNTRY_REGION_EXPANSION:
+            codes.extend(_COUNTRY_REGION_EXPANSION[name])
+        elif name in _STATE_CODE_MAP:
             codes.append(_STATE_CODE_MAP[name])
-    return codes if codes else ["us-fl"]
+        else:
+            logger.warning(f"[VIBE API] Unrecognized ICP_REGIONS token '{name}' — skipped.")
+    seen: set[str] = set()
+    deduped = [c for c in codes if not (c in seen or seen.add(c))]
+    if not deduped:
+        logger.warning(f"[VIBE API] No region codes resolved from ICP_REGIONS={raw!r}; filter omitted.")
+    return deduped
 
 
 def _build_job_levels() -> list[str]:
@@ -162,16 +219,23 @@ def _build_company_sizes() -> list[str]:
 
 
 def _build_naics_codes() -> list[str]:
-    """Parse ICP_INDUSTRIES env var into NAICS codes. Falls back to 238220 (HVAC)."""
+    """Parse ICP_INDUSTRIES env var into NAICS codes.
+
+    Returns [] on unset/unrecognized input so the caller omits the industry
+    filter entirely — never silently reverts to HVAC (238220)."""
     raw = ICP_INDUSTRIES.strip()
     if not raw or raw.startswith("["):
-        return ["238220"]
+        logger.warning("[VIBE API] ICP_INDUSTRIES unset/placeholder; industry filter omitted.")
+        return []
     codes = set()
     raw_lower = raw.lower()
     for keyword, naics_list in _INDUSTRY_TO_NAICS.items():
         if keyword in raw_lower:
             codes.update(naics_list)
-    return list(codes) if codes else ["238220"]
+    if not codes:
+        logger.warning(f"[VIBE API] No NAICS match for ICP_INDUSTRIES={raw!r}; industry filter omitted.")
+        return []
+    return sorted(codes)
 
 
 # ── Core API functions ─────────────────────────────────────────────────────────
@@ -235,18 +299,25 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
     all_prospects: list[dict] = []
     page = 1
 
+    # Only include a filter key when its mapper resolved values; an empty list
+    # would otherwise risk matching nothing (or being silently ignored).
+    filters: dict = {}
+    if region_codes:
+        filters["company_region_country_code"] = {"values": region_codes}
+    if job_levels:
+        filters["job_level"] = {"values": job_levels}
+    if company_sizes:
+        filters["company_size"] = {"values": company_sizes}
+    if naics_codes:
+        filters["naics_category"] = {"values": naics_codes}
+
     while len(all_prospects) < target:
         page_size = min(target - len(all_prospects), _EXPLORIUM_PAGE_SIZE)
         body = {
             "mode": "full",
             "page": page,
             "page_size": page_size,
-            "filters": {
-                "company_region_country_code": {"values": region_codes},
-                "job_level": {"values": job_levels},
-                "company_size": {"values": company_sizes},
-                "naics_category": {"values": naics_codes},
-            },
+            "filters": filters,
         }
         try:
             resp = requests.post(
