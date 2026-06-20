@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "execution"))
 from config import PIPELINE_PAUSED_FLAG, FOLLOWUP_DELAY_DAYS
 from smtp_client import get_session, reset_session
 from outreach_engine import run_initial_outreach, run_followup_outreach
+from reply_logger import run_reply_logger
 from brevo_reconcile import run_reconcile
 from sheets_client import (
     reset_smtp_failures,
@@ -52,7 +53,17 @@ def main() -> int:
     # Step 1 — Config validation (hard fail is handled in config.py import)
     logger.info("[MAIN] Config validated.")
 
-    # Step 2 — Reset leads stuck at failed from previous crashes
+    # Step 2 — Poll replies FIRST so any lead who replied is marked status=replied
+    # before follow-up (Touch 2+) eligibility is evaluated. Non-fatal: IMAP issues must not
+    # block outreach.
+    try:
+        reply_stats = run_reply_logger()
+        logger.info(f"[MAIN] Reply poll: {reply_stats}")
+    except Exception as e:
+        log_pipeline_error("reply_poll", str(e))
+        logger.warning(f"[MAIN] Reply poll failed (non-fatal): {e}")
+
+    # Step 3 — Reset leads stuck at failed from previous crashes
     reset_count = reset_smtp_failures()
     logger.info(f"[MAIN] Reset {reset_count} failed leads.")
 
@@ -76,7 +87,7 @@ def main() -> int:
         log_pipeline_error("initial_outreach", str(e))
         logger.error(f"[MAIN] Initial outreach error: {e}")
 
-    # Step 6 — Follow-up outreach (Touch 2/3), only if cap not hit
+    # Step 6 — Follow-up outreach (Touch 2..N, capped by MAX_FOLLOWUPS), only if cap not hit
     followup_stats = {"sent": 0, "failed": 0, "skipped": 0}
     if not initial_stats.get("cap_hit"):
         try:

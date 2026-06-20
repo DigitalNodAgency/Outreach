@@ -24,7 +24,7 @@
 ```
 new           Phase 1 write: dedup passed, ready for Touch 1
 outreach_sent Phase 2 write: Touch 1 sent
-followup_sent Phase 2 write: Touch 2 or 3 sent
+followup_sent Phase 2 write: a follow-up touch sent (Touch 2..MAX_FOLLOWUPS)
 replied       Reply logger or manual: lead responded
 closed        followup_count >= MAX_FOLLOWUPS or manually closed
 failed        Send error — auto-reset on next Phase 2 run
@@ -39,7 +39,7 @@ failed        Send error — auto-reset on next Phase 2 run
 | 0     | lead_email     | string  | Foreign key → Leads.email                         |
 | 1     | lead_name      | string  | Snapshot at send time.                            |
 | 2     | sequence_type  | string  | Template prefix (e.g. touch-aunz, touch-standard) |
-| 3     | stage_number   | integer | 1, 2, or 3.                                       |
+| 3     | stage_number   | integer | Touch number: 1..MAX_FOLLOWUPS (currently 1-4).   |
 | 4     | email_subject  | string  | Rendered subject line.                            |
 | 5     | sent_date      | string  | ISO 8601 UTC timestamp.                           |
 | 6     | status         | string  | "sent" or "failed".                               |

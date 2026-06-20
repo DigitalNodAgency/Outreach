@@ -1,6 +1,6 @@
 """
 outreach_engine.py — Core outreach send logic.
-Handles initial outreach (Touch 1) and follow-up outreach (Touch 2/3).
+Handles initial outreach (Touch 1) and follow-up outreach (Touch 2..MAX_FOLLOWUPS).
 """
 
 import logging
@@ -10,12 +10,18 @@ from datetime import datetime, timezone, timedelta
 from config import (
     FOLLOWUP_DELAY_DAYS, MAX_FOLLOWUPS, TEMPLATES_DIR,
     STATUS_NEW, STATUS_OUTREACH_SENT, STATUS_FOLLOWUP_SENT,
-    STATUS_CLOSED, STATUS_FAILED, REGION_TEMPLATE_MAP, DEFAULT_TEMPLATE_PREFIX,
+    STATUS_REPLIED, STATUS_CLOSED, STATUS_FAILED,
+    REGION_TEMPLATE_MAP, DEFAULT_TEMPLATE_PREFIX,
     DAILY_EMAIL_CAP, CALENDLY_URL, SENDER_NAME,
 )
 from smtp_client import send_email, is_cap_hit, get_session
 
 logger = logging.getLogger(__name__)
+
+# Never send a follow-up to a lead in one of these states (mirrors the social path).
+# Belt-and-suspenders: get_leads_by_status already filters, but this protects against
+# a reply that landed after the status fetch and against future query broadening.
+FOLLOWUP_EXCLUDED_STATUSES = {STATUS_REPLIED, STATUS_CLOSED, STATUS_FAILED}
 
 
 def _load_template(prefix: str, touch_number: int) -> tuple[str, str]:
@@ -52,11 +58,29 @@ def _render_template(subject: str, body: str, name: str, company: str) -> tuple[
 
 def _resolve_template_prefix(region: str) -> str:
     key = region.strip().lower()
-    return REGION_TEMPLATE_MAP.get(key, DEFAULT_TEMPLATE_PREFIX)
+    prefix = REGION_TEMPLATE_MAP.get(key, DEFAULT_TEMPLATE_PREFIX)
+    # Fall back to the default series if the mapped templates don't exist on disk
+    # (e.g. AU/NZ maps to touch-aunz but no touch-aunz-*.txt files were ever created).
+    if not os.path.exists(os.path.join(TEMPLATES_DIR, f"{prefix}-1.txt")):
+        if prefix != DEFAULT_TEMPLATE_PREFIX:
+            logger.warning(
+                f"[OUTREACH] Template series '{prefix}' missing; "
+                f"falling back to '{DEFAULT_TEMPLATE_PREFIX}' for region '{region}'."
+            )
+        return DEFAULT_TEMPLATE_PREFIX
+    return prefix
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _warmth_of(lead: dict) -> float:
+    """Parse a lead's warmth_score, treating blank/garbage as 0."""
+    try:
+        return float(lead.get("warmth_score", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def run_initial_outreach(outreach_log_cache: set) -> dict:
@@ -73,6 +97,10 @@ def run_initial_outreach(outreach_log_cache: set) -> dict:
     if not leads:
         logger.info("[OUTREACH] No new leads for Touch 1.")
         return stats
+
+    # Highest-warmth leads first, so the best-fit prospects go out before the
+    # daily (possibly warm-up-throttled) cap is reached.
+    leads.sort(key=_warmth_of, reverse=True)
 
     logger.info(f"[OUTREACH] Touch 1 — {len(leads)} leads queued.")
 
@@ -131,8 +159,10 @@ def run_initial_outreach(outreach_log_cache: set) -> dict:
 
 def run_followup_outreach(outreach_log_cache: set) -> dict:
     """
-    Send Touch 2 or Touch 3 to eligible leads.
+    Send the next follow-up touch (Touch 2..MAX_FOLLOWUPS) to eligible leads.
     Eligibility: status=outreach_sent or followup_sent AND last_contacted >= FOLLOWUP_DELAY_DAYS ago.
+    Touch number = followup_count + 1; loads touch-standard-{N}.txt. The lead is closed
+    once followup_count reaches MAX_FOLLOWUPS or no template exists for the next touch.
     Skips if initial outreach hit the daily cap.
     """
     from sheets_client import get_leads_by_status, update_lead_status, append_outreach_log
@@ -169,10 +199,17 @@ def run_followup_outreach(outreach_log_cache: set) -> dict:
         name = lead.get("name", "").strip()
         company = lead.get("company", "").strip()
         region = lead.get("region", "").strip()
+        status = lead.get("status", "").strip().lower()
         followup_count = int(lead.get("followup_count", 0) or 0)
         last_contacted_str = lead.get("last_contacted", "")
 
         if not email:
+            stats["skipped"] += 1
+            continue
+
+        # Never chase a lead who already replied / is closed / failed.
+        if status in FOLLOWUP_EXCLUDED_STATUSES:
+            logger.info(f"[FOLLOWUP] Skipping {email} (status={status}).")
             stats["skipped"] += 1
             continue
 
@@ -200,9 +237,17 @@ def run_followup_outreach(outreach_log_cache: set) -> dict:
 
         try:
             subject_tpl, body_tpl = _load_template(prefix, touch_number)
-        except FileNotFoundError as e:
-            logger.error(f"[FOLLOWUP] {e}")
-            stats["failed"] += 1
+        except FileNotFoundError:
+            # No template for this touch = end of the configured sequence. Close the
+            # lead gracefully instead of failing, so MAX_FOLLOWUPS can be raised beyond
+            # the number of touch-standard-*.txt files without stranding leads at
+            # status=failed. Effective ceiling = min(MAX_FOLLOWUPS, templates on disk).
+            logger.warning(
+                f"[FOLLOWUP] No template for touch {touch_number} (prefix '{prefix}'); "
+                f"closing {email} at end of available sequence."
+            )
+            update_lead_status(email, STATUS_CLOSED)
+            stats["skipped"] += 1
             continue
 
         subject, body = _render_template(subject_tpl, body_tpl, name, company)

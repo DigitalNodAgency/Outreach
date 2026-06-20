@@ -9,7 +9,7 @@ import os
 import requests
 from datetime import datetime, timedelta, timezone
 
-from config import BREVO_API_KEY
+from config import BREVO_API_KEY, MAX_FOLLOWUPS
 
 logger = logging.getLogger(__name__)
 
@@ -101,13 +101,17 @@ def run_reconcile(pre_sync: bool = False) -> dict:
         if not to_email:
             continue
 
-        # Try to infer stage number from subject (rough match — Touch 1/2/3)
+        # Best-effort stage inference from subject. Touches that share the same "Re:"
+        # subject can't be told apart here — this is reconciliation backfill only.
+        # The breakup (final touch) maps to MAX_FOLLOWUPS so there's no hardcoded ceiling.
         stage_number = "1"
         subject_lower = subject.lower()
-        if "follow" in subject_lower or "touch 2" in subject_lower:
-            stage_number = "2"
+        if "closing the loop" in subject_lower or "breakup" in subject_lower:
+            stage_number = str(MAX_FOLLOWUPS)
         elif "touch 3" in subject_lower or "last" in subject_lower:
             stage_number = "3"
+        elif "re:" in subject_lower or "follow" in subject_lower or "touch 2" in subject_lower:
+            stage_number = "2"
 
         key = (to_email, stage_number)
         if key in existing_cache:
