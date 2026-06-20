@@ -221,6 +221,7 @@ SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mircha
 ## 12. Improvement Log
 > Format: [vN | YYYY-MM-DD | description]
 
+- [v14 | 2026-06-20 | DISCOVERY ICP-MAPPER FIX — the v13 pivot's discovery was still returning HVAC-in-Florida leads despite correct GitHub repo vars. Root cause in run_vibe_api_discovery.py: two ICP→Explorium mappers SILENTLY fell back to the retired ICP whenever they didn't recognize the new values. (1) `_build_naics_codes`: `_INDUSTRY_TO_NAICS` only held HVAC/home-services keywords, so `ICP_INDUSTRIES=Marketing & Advertising...` matched nothing → fell back to `["238220"]` (HVAC NAICS). (2) `_build_region_codes`: `ICP_REGIONS=USA` wasn't in the state map → fell back to `["us-fl"]` (Florida). Fix: added verified agency NAICS to the map (541810 Advertising Agencies, 541820 PR Agencies, 541613 Marketing Consulting, 541830 Media Buying, 541890 Other Advertising Services); added `_US_STATE_CODES` (all 51) + `_COUNTRY_REGION_EXPANSION` so USA/United States expands to every state region code (the `company_region_country_code` filter 422s on a bare `us` — needs region codes like us-ca). Both mappers + `_fetch_prospects` now OMIT an unresolved filter (and log a warning) instead of reverting to HVAC/FL — the ICP vars can never be silently ignored again. Validated live: 48,327 US agency prospects match (was HVAC). ICP_COMPANY_SIZE recommended 11-200 (excludes the 1-10 micro bucket) per Rizan "not too small". Repo vars Rizan must still fix: ICP_PERSONA + ICP_DISQUALIFY (screenshot showed stale HVAC text; PERSONA only affects seniority so harmless, but update for correctness), ICP_COMPANY_SIZE 10-50→11-200. Sheet re-reset to one Rizan QA lead.]
 - [v13 | 2026-06-20 | NICHE PIVOT: HVAC → US social/digital marketing agencies; offer → guaranteed PR placements + reputation management (remove policy-violating Google reviews, suppress negative URLs). All outreach copy rewritten from the Digital Nod draft: email touch-standard-1..3 reworked + NEW touch-standard-4 breakup ("closing the loop"); social-linkedin-1..3 + social-facebook-1 reworked. Draft's unsupported tokens remapped — `{{Agency Name}}`→`{{company}}`/"your agency's", `{{number}}` dropped, Touch 3 = Version B (no invented numbers); only `{{name}}/{{company}}/{{calendly_url}}/{{sender_name}}` survive. Touch count made fully `MAX_FOLLOWUPS`-driven: de-hardcoded `>=3`/`<3` in sheets_client.advance_followup_staging, config default 3→4, brevo_reconcile breakup→`str(MAX_FOLLOWUPS)`; outreach_engine now CLOSES a lead (not fails) when the next touch template is missing, so MAX_FOLLOWUPS can exceed templates safely (effective ceiling = min(var, files on disk)). ICP block + env docs + SCHEMA stage_number updated. Live Sheet reset (scripts/seed_test_lead.py): backed up then wiped Leads + log/audit tabs to one Rizan QA lead. Action items for client: set repo vars MAX_FOLLOWUPS=4 + ICP_* (Section 13), add CAN-SPAM footer to sender. UPDATE_FOR_MOHIT.md drafted at root.]
 - [v1 | 2026-05-17 | Initial project restructure to spec layout. Flat-root → active/ hierarchy. Absolute file paths in config. Log files routed to logs/.]
 - [v2 | 2026-05-21 | Social outreach added: PhantomBuster Facebook + LinkedIn via social-outreach.yml (manual dispatch). Leads sheet col K = linkedin_url. Instagram replaced by LinkedIn throughout.]
@@ -264,14 +265,20 @@ never for lead discovery or email enrichment.
 > variables are updated (Rizan/Mohit) — editing this doc alone does not redirect sourcing.
 ```
 ICP_PERSONA     = agency owner,founder,CEO,managing director,partner,head of growth
-ICP_COMPANY_SIZE= 2-10,10-50
+ICP_COMPANY_SIZE= 11-200
 ICP_INDUSTRIES  = Marketing & Advertising,Marketing Services,Advertising Services,Digital Marketing,Social Media Marketing,Public Relations & Communications
 ICP_REGIONS     = USA
 ICP_DISQUALIFY  = Not a marketing/advertising/digital/social-media agency; in-house marketing teams; companies outside the US
 DAILY_EMAIL_CAP = 300
 MAX_LEADS_PER_RUN = 100
 ```
-> Industry/persona strings are tuned to the Explorium taxonomy on the first live discovery run.
+> Industry/persona strings are tuned to the Explorium taxonomy (verified live v14).
+> `ICP_COMPANY_SIZE=11-200` maps to Explorium buckets 11-50 + 51-200 — deliberately EXCLUDES
+> the 1-10 micro bucket (solo freelancers / 1-person shops) per Rizan's "agencies that already
+> make money, not too small" requirement. Lowering the floor to 10 (e.g. `10-50`) silently
+> re-includes the 1-10 bucket via range overlap.
+> `ICP_REGIONS=USA` expands to all 51 US state/territory region codes (the Explorium
+> `company_region_country_code` filter rejects a bare `us`). Single states still work by name.
 > Prior HVAC ICP (retired v13): persona HVAC owner/founder/CEO; industries HVAC; regions FL,TX,GA,NC,TN,USA.
 
 ### Outreach Sequence (v13 — 4-touch, agency/PR copy)
