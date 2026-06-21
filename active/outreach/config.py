@@ -67,6 +67,17 @@ SEND_DELAY_SECONDS = _float_env("SEND_DELAY_SECONDS", 5)
 SMTP_HEALTH_MIN_SENDS = _int_env("SMTP_HEALTH_MIN_SENDS", 5)
 SMTP_HEALTH_FAIL_THRESHOLD = _float_env("SMTP_HEALTH_FAIL_THRESHOLD", 0.5)
 
+# ── Inter-send pacing (cold-outbound anti-spam cadence) ────────────────────────
+# Cold sends must NOT go out on a fixed metronome. After each lead send the engine
+# sleeps a RANDOM duration in [MIN_SEND_GAP_SECONDS, MAX_SEND_GAP_SECONDS]. The
+# minimum is 5 minutes (300s) per the cold-outbound runbook; the max adds jitter so
+# the spacing is irregular. These apply to lead outreach only — operator
+# notifications (send_plain) use the short SEND_DELAY_SECONDS instead.
+# NOTE: at 5-8 min/send a daily batch is long-running. Keep the warm-up cap and the
+# phase2 workflow `timeout-minutes` in sync (≈ cap × MAX_SEND_GAP_SECONDS ÷ 60).
+MIN_SEND_GAP_SECONDS = _int_env("MIN_SEND_GAP_SECONDS", 300)
+MAX_SEND_GAP_SECONDS = _int_env("MAX_SEND_GAP_SECONDS", 480)
+
 # ── Cold-send warm-up ramp ─────────────────────────────────────────────────────
 # Protects domain reputation by ramping the daily send cap up gradually, then
 # settling at DAILY_EMAIL_CAP. The ramp is OFF (effective cap == DAILY_EMAIL_CAP)
@@ -75,10 +86,22 @@ SMTP_HEALTH_FAIL_THRESHOLD = _float_env("SMTP_HEALTH_FAIL_THRESHOLD", 0.5)
 # overridable so the numbers track repo variables, never hardcoded at the call site.
 WARMUP_START_DATE = os.getenv("WARMUP_START_DATE", "").strip()
 WARMUP_STEP_DAYS = _int_env("WARMUP_STEP_DAYS", 7)
+# Per-rung daily cap, one rung per WARMUP_STEP_DAYS days. Default ramp matches the
+# pre-flight runbook: week 1 ≈ 20-30/day, scaling toward 40-50/day by week 3, then
+# climbing gradually before settling at DAILY_EMAIL_CAP. NEVER jump straight to volume.
 WARMUP_SCHEDULE = [
-    int(x) for x in (os.getenv("WARMUP_SCHEDULE") or "25,50,100,200").split(",")
+    int(x) for x in (os.getenv("WARMUP_SCHEDULE") or "25,35,50,75,100,150,200").split(",")
     if x.strip().isdigit()
 ]
+
+# ── BillionVerify decision policy (list-hygiene hard gate) ─────────────────────
+# Catch-all addresses are NOT auto-included; they are kept only when BillionVerify's
+# confidence score clears this threshold (0-100 scale; a 0-1 score is normalised ×100).
+# A missing/unparseable score on a catch-all is treated as below threshold (quarantine).
+BV_CATCHALL_MIN_SCORE = _float_env("BV_CATCHALL_MIN_SCORE", 85.0)
+# Role-based / alias inboxes (info@, admin@, support@…) are quarantined by default so
+# warm-up volume isn't burned on shared aliases. Set BV_QUARANTINE_ROLE=false to send them.
+BV_QUARANTINE_ROLE = (os.getenv("BV_QUARANTINE_ROLE", "true").strip().lower() == "true")
 
 # ── Landing page / booking ─────────────────────────────────────────────────────
 CALENDLY_URL = os.getenv("CALENDLY_URL", "")

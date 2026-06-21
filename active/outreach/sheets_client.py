@@ -171,6 +171,35 @@ def get_leads_by_status(status: str) -> list[dict]:
     return [r for r in all_leads if r.get("status", "").strip().lower() == status.lower()]
 
 
+def get_suppression_set() -> tuple[set[str], set[str]]:
+    """Read the do-not-contact list from a 'Suppression' tab.
+
+    Column A = email (exact lowercase match); Column B = domain (optional, matches the
+    part after @ for whole-company suppression). A header row (first cell 'email'/'address')
+    is skipped if present. Returns (emails, domains). If the tab does not exist, returns
+    empty sets — suppression is an optional safety layer, never a hard dependency, so a
+    missing tab must not block a run."""
+    spreadsheet = _get_spreadsheet()
+    try:
+        ws = _with_backoff(spreadsheet.worksheet, "Suppression")
+    except gspread.WorksheetNotFound:
+        logger.info("[SHEETS] No 'Suppression' tab — do-not-contact cross-check skipped.")
+        return set(), set()
+    rows = _with_backoff(ws.get_all_values)
+    if not rows:
+        return set(), set()
+    start = 1 if rows[0] and rows[0][0].strip().lower() in ("email", "emails", "address") else 0
+    emails: set[str] = set()
+    domains: set[str] = set()
+    for row in rows[start:]:
+        if row and len(row) > 0 and "@" in row[0]:
+            emails.add(row[0].strip().lower())
+        if len(row) > 1 and row[1].strip():
+            domains.add(row[1].strip().lower().lstrip("@"))
+    logger.info(f"[SHEETS] Suppression list loaded: {len(emails)} emails, {len(domains)} domains.")
+    return emails, domains
+
+
 def get_leads_raw_values() -> list[list[str]]:
     """All Leads rows as raw value lists (cached client + 429 backoff).
     For callers that write back by row index (e.g. social URL enrichment)."""
@@ -458,6 +487,27 @@ def get_outreach_log_cache() -> set:
         if len(row) >= 4:
             cache.add((row[OLOG_LEAD_EMAIL].lower(), row[OLOG_STAGE_NUMBER]))
     return cache
+
+
+def get_stage_subjects(stage_number: int = 1) -> dict[str, str]:
+    """Return {lead_email_lower: email_subject} for a given outreach stage from
+    outreach_log. Lets follow-ups thread off the EXACT Touch-1 subject each lead
+    received (the variation engine varies Touch-1 subjects per lead). Last write wins."""
+    from config import OLOG_EMAIL_SUBJECT
+    ws = _get_sheet("outreach_log")
+    rows = _with_backoff(ws.get_all_values)
+    out: dict[str, str] = {}
+    target = str(stage_number)
+    for row in rows[1:]:
+        if len(row) <= OLOG_EMAIL_SUBJECT:
+            continue
+        if str(row[OLOG_STAGE_NUMBER]).strip() != target:
+            continue
+        email = row[OLOG_LEAD_EMAIL].strip().lower()
+        subj = row[OLOG_EMAIL_SUBJECT].strip()
+        if email and subj:
+            out[email] = subj
+    return out
 
 
 # ── Outreach Reply Log tab ─────────────────────────────────────────────────────

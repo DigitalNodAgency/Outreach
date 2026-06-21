@@ -6,9 +6,14 @@ Auth: BV-API-KEY header. Key is passed in by the caller (loaded from BV_API_KEY)
 The key is NEVER logged or printed. Base URL + endpoints per the BillionVerify v1
 spec (see VERIFY_EMAILS.md at repo root).
 
-Status → decision (per spec):
-  valid / catchall / role           → KEEP  (catchall + role are flagged)
+Status → decision (pre-flight hardened policy — see classify()):
+  valid                              → KEEP
+  catchall                           → KEEP only if confidence score ≥ threshold, else QUARANTINE
+  role                               → QUARANTINE by default (alias inbox; don't burn volume)
   invalid / risky / disposable / unknown → REMOVE
+Both QUARANTINE and REMOVE keep the lead off the email queue (email blanked at the
+Sheets layer); they differ only in the audit reason. KEEP_STATUSES below is retained
+for back-compat callers but classify() is the single source of truth.
 """
 
 import logging
@@ -26,6 +31,53 @@ _MAX_RETRIES = 3
 
 KEEP_STATUSES = {"valid", "catchall", "role"}
 REMOVE_STATUSES = {"invalid", "risky", "disposable", "unknown"}
+
+# classify() outcomes
+KEEP = "keep"
+QUARANTINE = "quarantine"
+REMOVE = "remove"
+
+
+def _score_to_pct(score) -> float | None:
+    """Best-effort parse of a BillionVerify confidence score to a 0-100 float.
+    A 0-1 fractional score is normalised ×100. Non-numeric/blank → None (unknown)."""
+    if score is None:
+        return None
+    try:
+        val = float(str(score).strip().rstrip("%"))
+    except (TypeError, ValueError):
+        return None
+    if val <= 1.0:
+        val *= 100.0
+    return val
+
+
+def classify(status: str, score=None, *, catchall_min_score: float = 85.0,
+             quarantine_role: bool = True) -> tuple[str, str]:
+    """Decide KEEP / QUARANTINE / REMOVE for one verification result.
+
+    Hardened pre-flight policy (overrides the original keep-all-catchall/role spec):
+      • role            → QUARANTINE (unless quarantine_role=False)
+      • catchall        → KEEP if confidence ≥ catchall_min_score, else QUARANTINE
+                          (a missing/unparseable score is treated as below threshold)
+      • valid           → KEEP
+      • invalid/risky/disposable/unknown → REMOVE
+      • any other label → QUARANTINE (conservative: never auto-send an unknown verdict)
+    Returns (outcome, reason)."""
+    s = (status or "unknown").strip().lower()
+    if s in REMOVE_STATUSES:
+        return REMOVE, s
+    if s == "role":
+        return (QUARANTINE, "role-based alias inbox") if quarantine_role else (KEEP, "role (send enabled)")
+    if s == "catchall":
+        pct = _score_to_pct(score)
+        if pct is not None and pct >= catchall_min_score:
+            return KEEP, f"catchall:confidence {pct:.0f}>={catchall_min_score:.0f}"
+        shown = f"{pct:.0f}" if pct is not None else "n/a"
+        return QUARANTINE, f"catchall:low-confidence {shown}<{catchall_min_score:.0f}"
+    if s == "valid":
+        return KEEP, "valid"
+    return QUARANTINE, f"unrecognized status '{s}'"
 
 
 class BillionVerifyError(Exception):

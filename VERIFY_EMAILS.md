@@ -73,17 +73,25 @@ Print the plan: input file, email column, total leads, method, credits needed
 ## STEP 2A — BULK (≤ 100 emails)
 
 `POST /verify/bulk` with `{"emails": [...], "check_smtp": false}`. Process
-`data.results`. Map status:
+`data.results`. Map status (hardened pre-flight policy — see `billionverify_client.classify`):
 
 ```
-valid      → KEEP ✅  safe to send
-catchall   → KEEP ⚠️  keep but flag (monitor bounces)
-role       → KEEP ⚠️  deliverable, lower engagement
-unknown    → REMOVE ❌ deliverability unconfirmed
-risky      → REMOVE ❌ potential delivery issue
-invalid    → REMOVE ❌ does not exist
-disposable → REMOVE ❌ throwaway email
+valid      → KEEP ✅       safe to send
+catchall   → KEEP / QUARANTINE ⚖️  KEEP only if confidence score ≥ BV_CATCHALL_MIN_SCORE
+                                    (default 85), else QUARANTINE. Not auto-included.
+role       → QUARANTINE 🚫  alias inbox (info@/admin@/support@…); off by default
+                            (BV_QUARANTINE_ROLE). Don't burn warm-up volume on aliases.
+unknown    → REMOVE ❌      deliverability unconfirmed
+risky      → REMOVE ❌      potential delivery issue
+invalid    → REMOVE ❌      does not exist
+disposable → REMOVE ❌      throwaway email
 ```
+
+> QUARANTINE and REMOVE both keep the lead OFF the email queue (email blanked at the
+> Sheets layer, row retained for social) and are logged to "Removed Emails" with the
+> reason; they differ only in that label. KEEP leads are flagged in notes with their
+> status + confidence score (e.g. `bv:valid:97`) for later bounce-vs-data-quality tracing.
+> Override defaults via env: `BV_CATCHALL_MIN_SCORE`, `BV_QUARANTINE_ROLE`.
 
 ## STEP 2B — FILE (> 100 emails)
 

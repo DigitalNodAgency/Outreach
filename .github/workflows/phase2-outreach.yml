@@ -9,7 +9,11 @@ on:
 jobs:
   outreach:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # Randomized 5-8 min inter-send pacing makes a daily batch long-running:
+    # budget ≈ daily_cap × 8 min. 300 min covers the warm-up caps (≤50/day) with
+    # headroom. NOTE: a single GitHub job caps at 6 h (360 min); before scaling
+    # past ~40/day move to multiple smaller daily runs (see readiness report §2).
+    timeout-minutes: 300
 
     steps:
       - name: Checkout repo
@@ -22,6 +26,9 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Create runtime directories
+        run: mkdir -p logs active/leads
 
       - name: Run Phase 2 outreach
         env:
@@ -38,6 +45,7 @@ jobs:
           MAX_FOLLOWUPS: ${{ vars.MAX_FOLLOWUPS }}
           CALENDLY_URL: ${{ vars.CALENDLY_URL }}
           SENDER_NAME: ${{ vars.SENDER_NAME }}
+          WARMUP_START_DATE: ${{ vars.WARMUP_START_DATE }}
         run: python active/outreach/main.py
 
       - name: Upload run logs
@@ -47,6 +55,7 @@ jobs:
           name: phase2-logs-${{ github.run_id }}
           path: |
             logs/phase2_run.log
+            logs/variant_log.jsonl
             active/leads/pipeline_errors.jsonl
             active/leads/template_metrics.tsv
           retention-days: 30
