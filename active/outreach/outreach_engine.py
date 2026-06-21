@@ -5,8 +5,10 @@ Handles initial outreach (Touch 1) and follow-up outreach (Touch 2..MAX_FOLLOWUP
 
 import logging
 import os
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 
+import variation_engine
 from config import (
     FOLLOWUP_DELAY_DAYS, MAX_FOLLOWUPS, TEMPLATES_DIR,
     STATUS_NEW, STATUS_OUTREACH_SENT, STATUS_FOLLOWUP_SENT,
@@ -22,6 +24,37 @@ logger = logging.getLogger(__name__)
 # Belt-and-suspenders: get_leads_by_status already filters, but this protects against
 # a reply that landed after the status fetch and against future query broadening.
 FOLLOWUP_EXCLUDED_STATUSES = {STATUS_REPLIED, STATUS_CLOSED, STATUS_FAILED}
+
+
+def _norm_suppression(suppression) -> tuple[set, set]:
+    """Coerce a possibly-None suppression arg into (emails, domains) sets."""
+    if not suppression:
+        return set(), set()
+    return suppression
+
+
+def _is_suppressed(email: str, suppression: tuple[set, set]) -> bool:
+    """True if the email — or its domain — is on the do-not-contact list."""
+    emails, domains = suppression
+    e = email.strip().lower()
+    if e in emails:
+        return True
+    domain = e.split("@")[-1] if "@" in e else ""
+    return bool(domain) and domain in domains
+
+
+def _build_followup_plans(leads: list[dict]) -> dict:
+    """Variation plans keyed by (prefix, touch_number) for a follow-up batch, so copy is
+    unique within each touch group. touch_number = followup_count + 1."""
+    groups: dict = defaultdict(list)
+    for lead in leads:
+        em = lead.get("email", "").strip().lower()
+        if not em:
+            continue
+        touch = int(lead.get("followup_count", 0) or 0) + 1
+        pfx = _resolve_template_prefix(lead.get("region", "").strip())
+        groups[(pfx, touch)].append(em)
+    return {key: variation_engine.build_plan(key[0], key[1], ems) for key, ems in groups.items()}
 
 
 def _load_template(prefix: str, touch_number: int) -> tuple[str, str]:
@@ -83,15 +116,18 @@ def _warmth_of(lead: dict) -> float:
         return 0.0
 
 
-def run_initial_outreach(outreach_log_cache: set) -> dict:
+def run_initial_outreach(outreach_log_cache: set, suppression=None) -> dict:
     """
     Send Touch 1 to all leads with status=new.
     Updates Sheets status → outreach_sent on success.
     Halts if daily cap hit or SMTP health degrades.
+    Skips do-not-contact (suppression) leads and varies copy per lead so no two leads
+    in the batch receive identical text.
     """
     from sheets_client import get_leads_by_status, update_lead_status, append_outreach_log
 
-    stats = {"sent": 0, "failed": 0, "skipped": 0, "cap_hit": False}
+    suppression = _norm_suppression(suppression)
+    stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0, "cap_hit": False}
     leads = get_leads_by_status(STATUS_NEW)
 
     if not leads:
@@ -103,6 +139,16 @@ def run_initial_outreach(outreach_log_cache: set) -> dict:
     leads.sort(key=_warmth_of, reverse=True)
 
     logger.info(f"[OUTREACH] Touch 1 — {len(leads)} leads queued.")
+
+    # Variation plans per resolved prefix → unique copy for every lead in the batch.
+    plans: dict = defaultdict(dict)
+    by_prefix: dict = defaultdict(list)
+    for lead in leads:
+        em = lead.get("email", "").strip().lower()
+        if em:
+            by_prefix[_resolve_template_prefix(lead.get("region", "").strip())].append(em)
+    for pfx, ems in by_prefix.items():
+        plans[pfx] = variation_engine.build_plan(pfx, 1, ems)
 
     for lead in leads:
         if is_cap_hit():
@@ -125,13 +171,24 @@ def run_initial_outreach(outreach_log_cache: set) -> dict:
             stats["skipped"] += 1
             continue
 
-        prefix = _resolve_template_prefix(region)
-        try:
-            subject_tpl, body_tpl = _load_template(prefix, 1)
-        except FileNotFoundError as e:
-            logger.error(f"[OUTREACH] {e}")
-            stats["failed"] += 1
+        # Do-not-contact / suppression cross-check — hard gate before the send queue.
+        if _is_suppressed(email, suppression):
+            logger.info(f"[OUTREACH] Suppressed (do-not-contact): {email}. Closing lead.")
+            update_lead_status(email, STATUS_CLOSED)
+            stats["suppressed"] += 1
             continue
+
+        prefix = _resolve_template_prefix(region)
+        variant = plans.get(prefix, {}).get(email.lower())
+        if variant:
+            subject_tpl, body_tpl = variant["subject"], variant["body"]
+        else:
+            try:
+                subject_tpl, body_tpl = _load_template(prefix, 1)
+            except FileNotFoundError as e:
+                logger.error(f"[OUTREACH] {e}")
+                stats["failed"] += 1
+                continue
 
         subject, body = _render_template(subject_tpl, body_tpl, name, company)
         success = send_email(to_email=email, subject=subject, body=body, from_name=SENDER_NAME)
@@ -148,26 +205,35 @@ def run_initial_outreach(outreach_log_cache: set) -> dict:
                 "sent_date": now,
                 "status": "sent",
             }, outreach_log_cache)
+            if variant:
+                variation_engine.log_variant(email, 1, variant)
             stats["sent"] += 1
         else:
             update_lead_status(email, STATUS_FAILED)
             stats["failed"] += 1
 
-    logger.info(f"[OUTREACH] Touch 1 done. Sent: {stats['sent']}, Failed: {stats['failed']}, Skipped: {stats['skipped']}")
+    logger.info(
+        f"[OUTREACH] Touch 1 done. Sent: {stats['sent']}, Failed: {stats['failed']}, "
+        f"Skipped: {stats['skipped']}, Suppressed: {stats['suppressed']}"
+    )
     return stats
 
 
-def run_followup_outreach(outreach_log_cache: set) -> dict:
+def run_followup_outreach(outreach_log_cache: set, suppression=None) -> dict:
     """
     Send the next follow-up touch (Touch 2..MAX_FOLLOWUPS) to eligible leads.
     Eligibility: status=outreach_sent or followup_sent AND last_contacted >= FOLLOWUP_DELAY_DAYS ago.
     Touch number = followup_count + 1; loads touch-standard-{N}.txt. The lead is closed
     once followup_count reaches MAX_FOLLOWUPS or no template exists for the next touch.
-    Skips if initial outreach hit the daily cap.
+    Skips if initial outreach hit the daily cap. Honors the do-not-contact list and
+    varies copy per lead. Re: threaded touches reuse the lead's exact Touch-1 subject.
     """
-    from sheets_client import get_leads_by_status, update_lead_status, append_outreach_log
+    from sheets_client import (
+        get_leads_by_status, update_lead_status, append_outreach_log, get_stage_subjects,
+    )
 
-    stats = {"sent": 0, "failed": 0, "skipped": 0}
+    suppression = _norm_suppression(suppression)
+    stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0}
 
     if is_cap_hit():
         logger.info("[FOLLOWUP] Daily cap already hit. Skipping follow-up run.")
@@ -184,6 +250,10 @@ def run_followup_outreach(outreach_log_cache: set) -> dict:
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=FOLLOWUP_DELAY_DAYS)
     logger.info(f"[FOLLOWUP] {len(leads)} candidates. Cutoff: {cutoff.date()}")
+
+    # Per-(prefix, touch) variation plans + Touch-1 subjects for proper Re: threading.
+    plans = _build_followup_plans(leads)
+    stage1_subjects = get_stage_subjects(1)
 
     for lead in leads:
         if is_cap_hit():
@@ -213,6 +283,13 @@ def run_followup_outreach(outreach_log_cache: set) -> dict:
             stats["skipped"] += 1
             continue
 
+        # Do-not-contact / suppression cross-check.
+        if _is_suppressed(email, suppression):
+            logger.info(f"[FOLLOWUP] Suppressed (do-not-contact): {email}. Closing lead.")
+            update_lead_status(email, STATUS_CLOSED)
+            stats["suppressed"] += 1
+            continue
+
         if followup_count >= MAX_FOLLOWUPS:
             update_lead_status(email, STATUS_CLOSED)
             stats["skipped"] += 1
@@ -236,7 +313,7 @@ def run_followup_outreach(outreach_log_cache: set) -> dict:
         prefix = _resolve_template_prefix(region)
 
         try:
-            subject_tpl, body_tpl = _load_template(prefix, touch_number)
+            flat_subject, flat_body = _load_template(prefix, touch_number)
         except FileNotFoundError:
             # No template for this touch = end of the configured sequence. Close the
             # lead gracefully instead of failing, so MAX_FOLLOWUPS can be raised beyond
@@ -249,6 +326,18 @@ def run_followup_outreach(outreach_log_cache: set) -> dict:
             update_lead_status(email, STATUS_CLOSED)
             stats["skipped"] += 1
             continue
+
+        variant = plans.get((prefix, touch_number), {}).get(email.lower())
+        body_tpl = variant["body"] if variant else flat_body
+        # Subject: thread off the lead's own Touch-1 subject when this touch is a Re:
+        # thread; otherwise use the variant's fresh subject (e.g. breakup) or the flat one.
+        recall = stage1_subjects.get(email.lower())
+        if flat_subject.lower().startswith("re:") and recall:
+            subject_tpl = f"Re: {recall}"
+        elif variant and variant.get("subject"):
+            subject_tpl = variant["subject"]
+        else:
+            subject_tpl = flat_subject
 
         subject, body = _render_template(subject_tpl, body_tpl, name, company)
         success = send_email(to_email=email, subject=subject, body=body, from_name=SENDER_NAME)
@@ -268,10 +357,15 @@ def run_followup_outreach(outreach_log_cache: set) -> dict:
                 "sent_date": now,
                 "status": "sent",
             }, outreach_log_cache)
+            if variant:
+                variation_engine.log_variant(email, touch_number, variant)
             stats["sent"] += 1
         else:
             update_lead_status(email, STATUS_FAILED)
             stats["failed"] += 1
 
-    logger.info(f"[FOLLOWUP] Done. Sent: {stats['sent']}, Failed: {stats['failed']}, Skipped: {stats['skipped']}")
+    logger.info(
+        f"[FOLLOWUP] Done. Sent: {stats['sent']}, Failed: {stats['failed']}, "
+        f"Skipped: {stats['skipped']}, Suppressed: {stats['suppressed']}"
+    )
     return stats

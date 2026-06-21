@@ -4,6 +4,7 @@ Handles daily cap enforcement, per-session health tracking, and send logging.
 """
 
 import logging
+import random
 import smtplib
 import time
 from datetime import date
@@ -13,11 +14,22 @@ from dataclasses import dataclass, field
 from config import (
     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM,
     DAILY_EMAIL_CAP, SEND_DELAY_SECONDS,
+    MIN_SEND_GAP_SECONDS, MAX_SEND_GAP_SECONDS,
     SMTP_HEALTH_MIN_SENDS, SMTP_HEALTH_FAIL_THRESHOLD,
     WARMUP_START_DATE, WARMUP_STEP_DAYS, WARMUP_SCHEDULE,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _pacing_gap() -> float:
+    """Randomized inter-send delay (seconds) for cold lead outreach. Uniform over
+    [MIN_SEND_GAP_SECONDS, MAX_SEND_GAP_SECONDS] so sends are never a fixed metronome,
+    with a hard 5-min-class minimum. Falls back to the min if the range is misconfigured."""
+    lo, hi = MIN_SEND_GAP_SECONDS, MAX_SEND_GAP_SECONDS
+    if hi < lo:
+        return float(lo)
+    return random.uniform(lo, hi)
 
 
 @dataclass
@@ -87,12 +99,14 @@ def is_cap_hit() -> bool:
     return _session.sends_today >= effective_daily_cap()
 
 
-def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> bool:
+def send_email(to_email: str, subject: str, body: str, from_name: str = "", pace: bool = True) -> bool:
     """
     Send a single email via Brevo SMTP.
     Respects daily cap. Tracks session health.
     Returns True on success, False on failure.
-    Applies SEND_DELAY_SECONDS after each send.
+    After a successful LEAD send (pace=True) sleeps a randomized 5-8 min gap so cold
+    outreach is never a fixed-interval metronome. Operator notifications pass pace=False
+    and only wait the short SEND_DELAY_SECONDS.
     """
     if is_cap_hit():
         logger.warning(f"[SMTP] Daily cap of {effective_daily_cap()} hit. Skipping send to {to_email}.")
@@ -139,7 +153,12 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> b
         _session.sends_today += 1
         _session.success_count += 1
         logger.info(f"[SMTP] Sent to {to_email} | subject: {subject[:50]}")
-        time.sleep(SEND_DELAY_SECONDS)
+        if pace:
+            gap = _pacing_gap()
+            logger.info(f"[SMTP] Pacing: sleeping {gap/60:.1f} min before next send.")
+            time.sleep(gap)
+        else:
+            time.sleep(SEND_DELAY_SECONDS)
         return True
 
     except smtplib.SMTPAuthenticationError as e:
@@ -162,5 +181,6 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "") -> b
 
 
 def send_plain(to_email: str, subject: str, body: str) -> bool:
-    """Alias for send_email without a from_name. Used for operator notifications."""
-    return send_email(to_email=to_email, subject=subject, body=body)
+    """Alias for send_email without a from_name. Used for operator notifications —
+    skips the long cold-send pacing gap (pace=False)."""
+    return send_email(to_email=to_email, subject=subject, body=body, pace=False)

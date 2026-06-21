@@ -21,6 +21,7 @@ from sheets_client import (
     reset_smtp_failures,
     dedup_outreach_log,
     get_outreach_log_cache,
+    get_suppression_set,
     advance_followup_staging,
 )
 from notify import send_outreach_summary, alert_smtp_degraded
@@ -75,23 +76,30 @@ def main() -> int:
         log_pipeline_error("brevo_pre_sync", str(e))
         logger.warning(f"[MAIN] Pre-sync failed (non-fatal): {e}")
 
-    # Step 4 — Load outreach log cache (dedup key for all sends this run)
+    # Step 4 — Load outreach log cache (dedup key for all sends this run) + the
+    # do-not-contact / suppression list (cross-checked before every send).
     outreach_log_cache = get_outreach_log_cache()
+    try:
+        suppression = get_suppression_set()
+    except Exception as e:
+        log_pipeline_error("suppression_load", str(e))
+        logger.warning(f"[MAIN] Could not load suppression list (non-fatal, treating as empty): {e}")
+        suppression = (set(), set())
 
     # Step 5 — Initial outreach (Touch 1)
-    initial_stats = {"sent": 0, "failed": 0, "skipped": 0, "cap_hit": False}
+    initial_stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0, "cap_hit": False}
     try:
-        initial_stats = run_initial_outreach(outreach_log_cache)
+        initial_stats = run_initial_outreach(outreach_log_cache, suppression)
         logger.info(f"[MAIN] Initial outreach: {initial_stats}")
     except Exception as e:
         log_pipeline_error("initial_outreach", str(e))
         logger.error(f"[MAIN] Initial outreach error: {e}")
 
     # Step 6 — Follow-up outreach (Touch 2..N, capped by MAX_FOLLOWUPS), only if cap not hit
-    followup_stats = {"sent": 0, "failed": 0, "skipped": 0}
+    followup_stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0}
     if not initial_stats.get("cap_hit"):
         try:
-            followup_stats = run_followup_outreach(outreach_log_cache)
+            followup_stats = run_followup_outreach(outreach_log_cache, suppression)
             logger.info(f"[MAIN] Follow-up outreach: {followup_stats}")
         except Exception as e:
             log_pipeline_error("followup_outreach", str(e))

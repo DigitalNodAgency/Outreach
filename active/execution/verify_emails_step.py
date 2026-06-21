@@ -36,8 +36,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "outreach"))
 
 from billionverify_client import (
     BillionVerifyClient, BillionVerifyAuthError,
-    KEEP_STATUSES, REMOVE_STATUSES,
+    classify, KEEP, QUARANTINE,
 )
+from config import BV_CATCHALL_MIN_SCORE, BV_QUARANTINE_ROLE
 
 logger = logging.getLogger(__name__)
 
@@ -89,39 +90,52 @@ def run_email_verification() -> dict:
     by_status: dict[str, int] = {}
     cells: list[tuple] = []
     removed_audit: list[dict] = []
-    kept = removed = 0
+    kept = removed = quarantined = 0
 
     for row_idx, email in pending.items():
         res = results.get(email.strip().lower()) or {}
         status = res.get("status", "unknown")
         score = res.get("score", "")
         by_status[status] = by_status.get(status, 0) + 1
+        outcome, reason = classify(
+            status, score,
+            catchall_min_score=BV_CATCHALL_MIN_SCORE,
+            quarantine_role=BV_QUARANTINE_ROLE,
+        )
 
         raw = rows[row_idx - 1]
         existing_notes = raw[COL_NOTES] if len(raw) > COL_NOTES else ""
-        flag = f"bv:{status}"
+        # Per-lead audit flag: status + confidence score, so bounce patterns can later
+        # be traced to data quality vs. infra. e.g. "bv:valid:97" / "bv:catchall:62".
+        flag = f"bv:{status}" + (f":{score}" if str(score).strip() else "")
         base_notes = f"{existing_notes} | {flag}" if existing_notes else flag
         lead_status = (raw[COL_STATUS].strip().lower() if len(raw) > COL_STATUS else "")
         is_uncontacted = lead_status in ("", "new")
 
-        if status in REMOVE_STATUSES:
-            removed += 1
-            if is_uncontacted:
-                cells.append((row_idx, COL_EMAIL, ""))            # blank bad email
-                cells.append((row_idx, COL_NOTES, f"{base_notes} (email removed)"))
-            else:
-                cells.append((row_idx, COL_NOTES, f"{base_notes} (bad email — already contacted)"))
-            removed_audit.append({
-                "email": email,
-                "name": raw[COL_NAME] if len(raw) > COL_NAME else "",
-                "company": raw[COL_COMPANY] if len(raw) > COL_COMPANY else "",
-                "bv_status": status,
-                "bv_reason": str(score),
-                "removed_date": now,
-            })
-        else:
+        if outcome == KEEP:
             kept += 1
             cells.append((row_idx, COL_NOTES, base_notes))
+            continue
+
+        # QUARANTINE (role / low-confidence catch-all / unrecognized) or REMOVE
+        # (invalid/risky/disposable/unknown) — both kept OFF the email queue.
+        if outcome == QUARANTINE:
+            quarantined += 1
+        else:
+            removed += 1
+        if is_uncontacted:
+            cells.append((row_idx, COL_EMAIL, ""))   # blank → Phase 2 skips the email touch
+            cells.append((row_idx, COL_NOTES, f"{base_notes} ({outcome}: {reason})"))
+        else:
+            cells.append((row_idx, COL_NOTES, f"{base_notes} ({outcome}: {reason}; already contacted)"))
+        removed_audit.append({
+            "email": email,
+            "name": raw[COL_NAME] if len(raw) > COL_NAME else "",
+            "company": raw[COL_COMPANY] if len(raw) > COL_COMPANY else "",
+            "bv_status": status,
+            "bv_reason": f"{outcome}: {reason}" + (f" (score {score})" if str(score).strip() else ""),
+            "removed_date": now,
+        })
 
     batch_update_cells(cells)
     append_removed_emails(removed_audit)
@@ -130,6 +144,7 @@ def run_email_verification() -> dict:
         "skipped": False,
         "verified": len(pending),
         "kept": kept,
+        "quarantined": quarantined,
         "removed": removed,
         "by_status": by_status,
         "credits_before": balance,
@@ -200,13 +215,19 @@ def verify_csv(csv_path: str) -> dict:
         email = (r.get(email_col) or "").strip().lower()
         res = results.get(email, {"status": "unknown", "score": ""})
         status = res["status"]
+        score = res.get("score", "")
         by_status[status] = by_status.get(status, 0) + 1
+        outcome, reason = classify(
+            status, score,
+            catchall_min_score=BV_CATCHALL_MIN_SCORE,
+            quarantine_role=BV_QUARANTINE_ROLE,
+        )
         out = dict(r)
         out["bv_status"] = status
-        if status in KEEP_STATUSES:
+        if outcome == KEEP:
             kept_rows.append(out)
         else:
-            out["bv_reason"] = str(res.get("score", ""))
+            out["bv_reason"] = f"{outcome}: {reason}" + (f" (score {score})" if str(score).strip() else "")
             removed_rows.append(out)
 
     _write_csv(verified_path, fieldnames + ["bv_status"], kept_rows)
