@@ -9,11 +9,12 @@ on:
 jobs:
   outreach:
     runs-on: ubuntu-latest
-    # Randomized 5-8 min inter-send pacing makes a daily batch long-running:
-    # budget ≈ daily_cap × 8 min. 300 min covers the warm-up caps (≤50/day) with
-    # headroom. NOTE: a single GitHub job caps at 6 h (360 min); before scaling
-    # past ~40/day move to multiple smaller daily runs (see readiness report §2).
-    timeout-minutes: 300
+    # Inter-send pacing is MIN_SEND_GAP_SECONDS..MAX_SEND_GAP_SECONDS (repo vars).
+    # Default 100–120 s/send → budget ≈ daily_cap × 2 min.
+    # 60 min covers warm-up caps (≤50/day) with headroom; raise if cap grows.
+    # NOTE: single GitHub job caps at 6 h; split into smaller runs before scaling
+    # past ~150/day at 120 s/send.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repo
@@ -46,6 +47,8 @@ jobs:
           CALENDLY_URL: ${{ vars.CALENDLY_URL }}
           SENDER_NAME: ${{ vars.SENDER_NAME }}
           WARMUP_START_DATE: ${{ vars.WARMUP_START_DATE }}
+          MIN_SEND_GAP_SECONDS: ${{ vars.MIN_SEND_GAP_SECONDS }}
+          MAX_SEND_GAP_SECONDS: ${{ vars.MAX_SEND_GAP_SECONDS }}
         run: python active/outreach/main.py
 
       - name: Upload run logs
