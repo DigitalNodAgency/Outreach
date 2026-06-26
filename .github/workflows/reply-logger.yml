@@ -1,9 +1,8 @@
 name: reply-logger
 
 on:
-  # PAUSED — total makeover in progress. Re-enable schedule when ready.
-  # schedule:
-  #   - cron: "0 11 * * *"   # daily 11:00 UTC — 1 hour after outreach
+  schedule:
+    - cron: "0 11 * * *"     # daily 11:00 UTC — 1 hour after outreach
   workflow_dispatch:
 
 jobs:

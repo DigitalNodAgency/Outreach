@@ -1,9 +1,8 @@
 name: phase2-outreach
 
 on:
-  # PAUSED — total makeover in progress. Re-enable schedule when ready.
-  # schedule:
-  #   - cron: "17 10 * * *"   # daily 10:17 UTC
+  schedule:
+    - cron: "17 10 * * *"    # daily 10:17 UTC — Phase 2 outreach
   workflow_dispatch:         # manual trigger from Actions tab
 
 jobs:
