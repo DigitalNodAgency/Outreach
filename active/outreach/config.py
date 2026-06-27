@@ -159,6 +159,13 @@ REMOVED_EMAILS_HEADERS = [
     "email", "name", "company", "bv_status", "bv_reason", "removed_date"
 ]
 
+# Discovery State tab — durable per-ICP pagination cursor. Lives in the Sheet (not a
+# local file) so it survives the ephemeral GitHub Actions filesystem and is shared
+# across every run host. One row per filter_key (a hash of the resolved ICP filters).
+DISCOVERY_STATE_HEADERS = [
+    "filter_key", "offset", "total_results", "updated"
+]
+
 # ── Region → template series routing ──────────────────────────────────────────
 # Format: region_value_in_sheet (lowercase) → template prefix.
 # Client targets the USA only, so every region routes to the standard US series.
@@ -199,7 +206,6 @@ ICP_DISQUALIFY = os.getenv("ICP_DISQUALIFY", "[CLIENT_DISQUALIFY_CONDITIONS]")
 VIBE_EXPORT_CSV = str(_ROOT / "active" / "leads" / "vibe_export.csv")
 RUN_METRICS_TSV = str(_ROOT / "active" / "leads" / "run_metrics.tsv")
 SOURCE_HEALTH_JSON = str(_ROOT / "active" / "leads" / "source_health.json")
-DISCOVERY_CURSOR_JSON = str(_ROOT / "active" / "leads" / "discovery_cursor.json")
 FAILED_RECORDS_JSONL = str(_ROOT / "active" / "leads" / "failed_records.jsonl")
 PIPELINE_ERRORS_JSONL = str(_ROOT / "active" / "leads" / "pipeline_errors.jsonl")
 TEMPLATE_METRICS_TSV = str(_ROOT / "active" / "leads" / "template_metrics.tsv")

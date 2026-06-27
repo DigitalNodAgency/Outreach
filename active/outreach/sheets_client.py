@@ -16,7 +16,7 @@ from gspread.exceptions import APIError
 from config import (
     GOOGLE_SERVICE_ACCOUNT_JSON, SPREADSHEET_ID,
     LEADS_HEADERS, OUTREACH_LOG_HEADERS, REPLY_LOG_HEADERS, SOCIAL_LOG_HEADERS,
-    REMOVED_EMAILS_HEADERS,
+    REMOVED_EMAILS_HEADERS, DISCOVERY_STATE_HEADERS,
     COL_EMAIL, COL_STATUS, COL_LAST_CONTACTED, COL_FOLLOWUP_COUNT,
     COL_NAME, COL_COMPANY, COL_REGION, COL_FACEBOOK_URL, COL_LINKEDIN_URL,
     OLOG_LEAD_EMAIL, OLOG_STAGE_NUMBER,
@@ -205,6 +205,65 @@ def get_leads_raw_values() -> list[list[str]]:
     For callers that write back by row index (e.g. social URL enrichment)."""
     ws = _get_sheet("Leads")
     return _with_backoff(ws.get_all_values)
+
+
+# ── Discovery State tab (durable pagination cursor) ────────────────────────────
+
+def get_discovery_cursor() -> dict:
+    """Return the per-ICP discovery pagination cursor from the 'Discovery State' tab
+    as {filter_key: {"offset": int, "total_results": int}}.
+
+    Stored in the Sheet (not a local file) so it survives GitHub Actions' ephemeral
+    filesystem. Returns {} if the tab is absent/empty so discovery degrades safely to
+    offset 0 rather than failing."""
+    spreadsheet = _get_spreadsheet()
+    try:
+        ws = _with_backoff(spreadsheet.worksheet, "Discovery State")
+    except gspread.WorksheetNotFound:
+        return {}
+    rows = _with_backoff(ws.get_all_values)
+    if not rows:
+        return {}
+    start = 1 if rows[0] and rows[0][0].strip().lower() == "filter_key" else 0
+    cursor: dict[str, dict] = {}
+    for row in rows[start:]:
+        if not row or not row[0].strip():
+            continue
+        key = row[0].strip()
+        def _int(idx: int) -> int:
+            try:
+                return int(row[idx]) if len(row) > idx and str(row[idx]).strip() else 0
+            except (ValueError, TypeError):
+                return 0
+        cursor[key] = {"offset": _int(1), "total_results": _int(2)}
+    return cursor
+
+
+def set_discovery_cursor(filter_key: str, offset: int, total_results: int) -> None:
+    """Upsert the pagination offset for one ICP filter set in the 'Discovery State'
+    tab (one row per filter_key; updated in place or appended). Best-effort: a Sheets
+    error is logged, not raised, so persistence never aborts a discovery run."""
+    try:
+        ws = _get_sheet("Discovery State")
+        ensure_headers("Discovery State", DISCOVERY_STATE_HEADERS)
+        new_values = [
+            filter_key, str(offset), str(total_results),
+            datetime.now(timezone.utc).isoformat(),
+        ]
+        rows = _with_backoff(ws.get_all_values)
+        target_row = None
+        for i, row in enumerate(rows[1:], start=2):
+            if row and row[0].strip() == filter_key:
+                target_row = i
+                break
+        if target_row:
+            _with_backoff(ws.update, f"A{target_row}:D{target_row}", [new_values],
+                          value_input_option="RAW")
+        else:
+            _with_backoff(ws.append_row, new_values, value_input_option="RAW")
+        logger.info(f"[SHEETS] Discovery cursor saved: offset={offset} total={total_results}")
+    except Exception as e:
+        logger.warning(f"[SHEETS] Could not persist discovery cursor: {e}")
 
 
 def update_lead_cell(row_idx: int, col_zero_based: int, value: str) -> None:
