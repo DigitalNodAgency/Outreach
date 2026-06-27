@@ -6,6 +6,8 @@ All ICP filters (regions, job levels, company sizes, industries) are read from
 environment variables — never hardcoded.
 """
 
+import hashlib
+import json
 import logging
 import os
 import sys
@@ -22,6 +24,7 @@ from config import (
     ICP_PERSONA,
     ICP_COMPANY_SIZE,
     ICP_INDUSTRIES,
+    DISCOVERY_CURSOR_JSON,
 )
 from pipeline_metrics import log_pipeline_error, record_source_run, record_run_stats
 from ingest_vibe_export import _validate_email, _deduplicate
@@ -285,9 +288,79 @@ def _source_tag() -> str:
 _EXPLORIUM_PAGE_SIZE = 100  # Explorium API hard cap per page
 
 
+# ── Discovery pagination cursor ────────────────────────────────────────────────
+# Explorium returns prospects in a stable order, so fetching page 1 on every run
+# re-reads the same top-of-pool prospects — which dedup then drops as already-seen,
+# yielding 0 new leads even though tens of thousands match. We persist a per-ICP
+# record OFFSET across runs so each run walks the NEXT slice of the pool. The offset
+# is keyed by a hash of the resolved filters, so changing the ICP starts a fresh
+# walk automatically. State file lives under active/leads/ (gitignored).
+# NOTE: GitHub Actions filesystems are ephemeral — this persists for local / Task
+# Scheduler runs only; a scheduled GHA Phase 1 would need a durable store (a Sheet
+# tab or actions/cache) swapped in behind _load_cursor/_save_cursor.
+
+def _filter_key(filters: dict) -> str:
+    """Stable short hash of the resolved filter set — the cursor key. Changing the
+    ICP changes the key, so the offset resets to 0 automatically (pivot-safe)."""
+    blob = json.dumps(filters, sort_keys=True)
+    return hashlib.sha1(blob.encode()).hexdigest()[:16]
+
+
+def _load_cursor() -> dict:
+    """Load the discovery cursor state. Returns {} if missing or corrupt."""
+    try:
+        with open(DISCOVERY_CURSOR_JSON, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    except Exception as e:
+        logger.warning(f"[VIBE API] Could not read discovery cursor: {e}")
+        return {}
+
+
+def _save_cursor(state: dict) -> None:
+    """Persist the discovery cursor state. Non-fatal on failure."""
+    try:
+        os.makedirs(os.path.dirname(DISCOVERY_CURSOR_JSON), exist_ok=True)
+        with open(DISCOVERY_CURSOR_JSON, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        logger.warning(f"[VIBE API] Could not write discovery cursor: {e}")
+
+
+def _fetch_page(api_key: str, filters: dict, page: int) -> tuple[list[dict], int, bool]:
+    """Fetch one /v1/prospects page (fixed page_size). Returns
+    (prospects, total_results, ok). ok=False signals a hard error → caller stops."""
+    body = {"mode": "full", "page": page, "page_size": _EXPLORIUM_PAGE_SIZE, "filters": filters}
+    try:
+        resp = requests.post(
+            f"{BASE_URL}/prospects",
+            json=body,
+            headers=_headers(api_key),
+            timeout=REQUEST_TIMEOUT,
+        )
+        if not resp.ok:
+            if resp.status_code == 402 or _is_credit_exhausted(resp):
+                alert_token_exhausted("Explorium", resp.text[:300])
+            logger.error(f"[VIBE API] fetch_prospects page {page} {resp.status_code}: {resp.text[:500]}")
+            return [], 0, False
+        data = resp.json()
+        prospects = data.get("data", [])
+        total_available = data.get("total_results", 0)
+        logger.info(
+            f"[VIBE API] page {page}: {len(prospects)} returned "
+            f"(total_results={total_available})"
+        )
+        return prospects, total_available, True
+    except Exception as e:
+        logger.error(f"[VIBE API] fetch_prospects page {page} error: {e}")
+        return [], 0, False
+
+
 def _fetch_prospects(api_key: str, target: int) -> list[dict]:
-    """Fetch prospect records via POST /v1/prospects with ICP filters from env vars.
-    Paginates automatically when target > 100 (Explorium page_size cap)."""
+    """Fetch up to `target` prospect records via POST /v1/prospects with ICP filters
+    from env vars, resuming from the persisted per-ICP offset so each run pulls the
+    NEXT slice of the pool (not the same page-1 prospects every time)."""
     region_codes = _build_region_codes()
     job_levels = _build_job_levels()
     company_sizes = _build_company_sizes()
@@ -296,8 +369,6 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
         f"[VIBE API] Filters — regions: {region_codes}, "
         f"job_levels: {job_levels}, sizes: {company_sizes}, naics: {naics_codes}"
     )
-    all_prospects: list[dict] = []
-    page = 1
 
     # Only include a filter key when its mapper resolved values; an empty list
     # would otherwise risk matching nothing (or being silently ignored).
@@ -311,48 +382,60 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
     if naics_codes:
         filters["naics_category"] = {"values": naics_codes}
 
+    # Resume from the persisted offset for this exact filter set.
+    key = _filter_key(filters)
+    state = _load_cursor()
+    start_offset = int(state.get(key, {}).get("offset", 0))
+    prior_total = int(state.get(key, {}).get("total_results", 0))
+    # If we previously walked off the end of the pool, wrap to the start.
+    if prior_total and start_offset >= prior_total:
+        logger.info(f"[VIBE API] Cursor offset {start_offset} >= pool {prior_total}; wrapping to 0.")
+        start_offset = 0
+
+    all_prospects: list[dict] = []
+    total_available = prior_total
+    offset = start_offset
+    wrapped = False  # wrap to the start at most once per run (guards against a loop)
+
     while len(all_prospects) < target:
-        page_size = min(target - len(all_prospects), _EXPLORIUM_PAGE_SIZE)
-        body = {
-            "mode": "full",
-            "page": page,
-            "page_size": page_size,
-            "filters": filters,
-        }
-        try:
-            resp = requests.post(
-                f"{BASE_URL}/prospects",
-                json=body,
-                headers=_headers(api_key),
-                timeout=REQUEST_TIMEOUT,
-            )
-            if not resp.ok:
-                if resp.status_code == 402 or _is_credit_exhausted(resp):
-                    alert_token_exhausted("Explorium", resp.text[:300])
-                logger.error(f"[VIBE API] fetch_prospects page {page} {resp.status_code}: {resp.text[:500]}")
-                break
-            data = resp.json()
-            page_prospects = data.get("data", [])
-            total_available = data.get("total_results", 0)
-            logger.info(
-                f"[VIBE API] page {page}: {len(page_prospects)} returned "
-                f"(total_results={total_available})"
-            )
-            if not page_prospects:
-                break
-            all_prospects.extend(page_prospects)
-            # Stop if we've consumed all available results
-            if total_available and len(all_prospects) >= total_available:
-                break
-            page += 1
-        except Exception as e:
-            logger.error(f"[VIBE API] fetch_prospects page {page} error: {e}")
+        page = offset // _EXPLORIUM_PAGE_SIZE + 1   # Explorium pages are 1-indexed
+        skip = offset % _EXPLORIUM_PAGE_SIZE        # drop records already consumed
+        page_prospects, page_total, ok = _fetch_page(api_key, filters, page)
+        if not ok:
             break
+        if page_total:
+            total_available = page_total
+        usable = page_prospects[skip:] if skip else page_prospects
+        if not usable:
+            # End of pool (empty page) or offset landed past the last record.
+            if not wrapped and offset > 0:
+                logger.info("[VIBE API] Reached end of pool; wrapping cursor to offset 0.")
+                offset = 0
+                wrapped = True
+                continue
+            break
+        taken = usable[: target - len(all_prospects)]
+        all_prospects.extend(taken)
+        offset += len(taken)
+        # Stop if we've now consumed the entire pool.
+        if total_available and offset >= total_available:
+            break
+
+    # Persist the new offset so the next run continues where this one left off.
+    state[key] = {
+        "offset": offset,
+        "total_results": total_available,
+        "updated": datetime.now(timezone.utc).isoformat(),
+    }
+    _save_cursor(state)
 
     if all_prospects:
         logger.debug(f"[VIBE API] First prospect fields: {list(all_prospects[0].keys())}")
         logger.debug(f"[VIBE API] First prospect sample: {all_prospects[0]}")
-    logger.info(f"[VIBE API] Total fetched: {len(all_prospects)} prospects (target={target})")
+    logger.info(
+        f"[VIBE API] Total fetched: {len(all_prospects)} prospects (target={target}); "
+        f"cursor offset {start_offset} -> {offset} of {total_available}."
+    )
     return all_prospects
 
 
