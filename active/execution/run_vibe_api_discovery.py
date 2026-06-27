@@ -24,7 +24,6 @@ from config import (
     ICP_PERSONA,
     ICP_COMPANY_SIZE,
     ICP_INDUSTRIES,
-    DISCOVERY_CURSOR_JSON,
 )
 from pipeline_metrics import log_pipeline_error, record_source_run, record_run_stats
 from ingest_vibe_export import _validate_email, _deduplicate
@@ -293,11 +292,10 @@ _EXPLORIUM_PAGE_SIZE = 100  # Explorium API hard cap per page
 # re-reads the same top-of-pool prospects — which dedup then drops as already-seen,
 # yielding 0 new leads even though tens of thousands match. We persist a per-ICP
 # record OFFSET across runs so each run walks the NEXT slice of the pool. The offset
-# is keyed by a hash of the resolved filters, so changing the ICP starts a fresh
-# walk automatically. State file lives under active/leads/ (gitignored).
-# NOTE: GitHub Actions filesystems are ephemeral — this persists for local / Task
-# Scheduler runs only; a scheduled GHA Phase 1 would need a durable store (a Sheet
-# tab or actions/cache) swapped in behind _load_cursor/_save_cursor.
+# is keyed by a hash of the resolved filters, so changing the ICP starts a fresh walk
+# automatically. The cursor is stored IN THE GOOGLE SHEET ('Discovery State' tab) via
+# sheets_client so it survives GitHub Actions' ephemeral filesystem and is shared
+# across every run host (local or cloud), keyed off the same SPREADSHEET_ID.
 
 def _filter_key(filters: dict) -> str:
     """Stable short hash of the resolved filter set — the cursor key. Changing the
@@ -307,25 +305,24 @@ def _filter_key(filters: dict) -> str:
 
 
 def _load_cursor() -> dict:
-    """Load the discovery cursor state. Returns {} if missing or corrupt."""
+    """Load the per-ICP discovery cursor from the Sheet, as
+    {filter_key: {"offset": int, "total_results": int}}. Returns {} on any error so
+    discovery degrades to offset 0 rather than crashing."""
     try:
-        with open(DISCOVERY_CURSOR_JSON, encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        from sheets_client import get_discovery_cursor
+        return get_discovery_cursor()
     except Exception as e:
-        logger.warning(f"[VIBE API] Could not read discovery cursor: {e}")
+        logger.warning(f"[VIBE API] Could not load discovery cursor: {e}")
         return {}
 
 
-def _save_cursor(state: dict) -> None:
-    """Persist the discovery cursor state. Non-fatal on failure."""
+def _save_cursor(filter_key: str, offset: int, total_results: int) -> None:
+    """Persist the per-ICP discovery offset to the Sheet. Best-effort (never raises)."""
     try:
-        os.makedirs(os.path.dirname(DISCOVERY_CURSOR_JSON), exist_ok=True)
-        with open(DISCOVERY_CURSOR_JSON, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
+        from sheets_client import set_discovery_cursor
+        set_discovery_cursor(filter_key, offset, total_results)
     except Exception as e:
-        logger.warning(f"[VIBE API] Could not write discovery cursor: {e}")
+        logger.warning(f"[VIBE API] Could not save discovery cursor: {e}")
 
 
 def _fetch_page(api_key: str, filters: dict, page: int) -> tuple[list[dict], int, bool]:
@@ -384,9 +381,9 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
 
     # Resume from the persisted offset for this exact filter set.
     key = _filter_key(filters)
-    state = _load_cursor()
-    start_offset = int(state.get(key, {}).get("offset", 0))
-    prior_total = int(state.get(key, {}).get("total_results", 0))
+    entry = _load_cursor().get(key, {})
+    start_offset = int(entry.get("offset", 0) or 0)
+    prior_total = int(entry.get("total_results", 0) or 0)
     # If we previously walked off the end of the pool, wrap to the start.
     if prior_total and start_offset >= prior_total:
         logger.info(f"[VIBE API] Cursor offset {start_offset} >= pool {prior_total}; wrapping to 0.")
@@ -422,12 +419,7 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
             break
 
     # Persist the new offset so the next run continues where this one left off.
-    state[key] = {
-        "offset": offset,
-        "total_results": total_available,
-        "updated": datetime.now(timezone.utc).isoformat(),
-    }
-    _save_cursor(state)
+    _save_cursor(key, offset, total_available)
 
     if all_prospects:
         logger.debug(f"[VIBE API] First prospect fields: {list(all_prospects[0].keys())}")
