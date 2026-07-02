@@ -110,6 +110,9 @@ def send_outreach_summary(
     cap_hit: bool = False,
     health_degraded: bool = False,
     errors: list[str] = None,
+    suppressed_unsub: int = 0,
+    suppressed_bounced: int = 0,
+    suppressed_new: int = 0,
 ) -> None:
     """Phase 2 summary email to operator."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -124,6 +127,8 @@ def send_outreach_summary(
         f"Failed sends:             {failed}",
         f"Daily cap hit:            {'YES' if cap_hit else 'no'}",
         f"SMTP health degraded:     {'YES — CHECK IMMEDIATELY' if health_degraded else 'no'}",
+        f"Brevo suppressions:       {suppressed_unsub} unsub, {suppressed_bounced} bounced "
+        f"({suppressed_new} newly added to Suppression tab)",
     ]
 
     if errors:

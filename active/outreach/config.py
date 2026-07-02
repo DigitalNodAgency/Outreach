@@ -184,6 +184,12 @@ STATUS_FOLLOWUP_SENT = "followup_sent"
 STATUS_REPLIED = "replied"
 STATUS_CLOSED = "closed"
 STATUS_FAILED = "failed"
+# Terminal do-not-contact states set by the Brevo suppression sync (brevo_reconcile
+# .sync_brevo_suppression). A lead in either never gets another touch. `unsubscribed`
+# = recipient unsubscribed / spam-flagged / admin-blocked at Brevo; `bounced` = hard
+# bounce. Both are ALSO written to the Suppression tab (durable, cross-run gate).
+STATUS_UNSUBSCRIBED = "unsubscribed"
+STATUS_BOUNCED = "bounced"
 
 # ── Discovery ─────────────────────────────────────────────────────────────────
 MAX_LEADS_PER_RUN = _int_env("MAX_LEADS_PER_RUN", 100)
