@@ -16,7 +16,7 @@ from config import PIPELINE_PAUSED_FLAG, FOLLOWUP_DELAY_DAYS
 from smtp_client import get_session, reset_session
 from outreach_engine import run_initial_outreach, run_followup_outreach
 from reply_logger import run_reply_logger
-from brevo_reconcile import run_reconcile
+from brevo_reconcile import run_reconcile, sync_brevo_suppression
 from sheets_client import (
     reset_smtp_failures,
     dedup_outreach_log,
@@ -70,6 +70,20 @@ def main() -> int:
     except Exception as e:
         log_pipeline_error("reply_poll", str(e))
         logger.error(f"[MAIN] Reply poll failed — follow-ups will be SKIPPED this run: {e}")
+
+    # Step 2.5 — Sync Brevo unsubscribes/bounces/spam into the Sheet BEFORE any send
+    # decision or the failed→new reset. Pulls Brevo's do-not-contact list, appends new
+    # addresses to the Suppression tab, and flips matching active leads to unsubscribed/
+    # bounced. Runs before reset_smtp_failures (so a bounced lead isn't resurrected) and
+    # before the suppression list is loaded below (so this run's send gate already blocks
+    # them). Non-fatal: a Brevo hiccup must never halt outreach.
+    suppress_stats = {"fetched": 0, "suppressed_new": 0, "leads_marked": 0, "unsub": 0, "bounced": 0}
+    try:
+        suppress_stats = sync_brevo_suppression()
+        logger.info(f"[MAIN] Brevo suppression sync: {suppress_stats}")
+    except Exception as e:
+        log_pipeline_error("brevo_suppression_sync", str(e))
+        logger.warning(f"[MAIN] Brevo suppression sync failed (non-fatal): {e}")
 
     # Step 3 — Reset leads stuck at failed from previous crashes
     reset_count = reset_smtp_failures()
@@ -147,6 +161,9 @@ def main() -> int:
             cap_hit=session.cap_hit,
             health_degraded=session.health_degraded,
             errors=errors,
+            suppressed_unsub=suppress_stats["unsub"],
+            suppressed_bounced=suppress_stats["bounced"],
+            suppressed_new=suppress_stats["suppressed_new"],
         )
     except Exception as e:
         logger.error(f"[MAIN] Failed to send summary email: {e}")

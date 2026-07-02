@@ -13,6 +13,7 @@ from config import (
     FOLLOWUP_DELAY_DAYS, MAX_FOLLOWUPS, TEMPLATES_DIR,
     STATUS_NEW, STATUS_OUTREACH_SENT, STATUS_FOLLOWUP_SENT,
     STATUS_REPLIED, STATUS_CLOSED, STATUS_FAILED,
+    STATUS_UNSUBSCRIBED, STATUS_BOUNCED,
     REGION_TEMPLATE_MAP, DEFAULT_TEMPLATE_PREFIX,
     DAILY_EMAIL_CAP, CALENDLY_URL, SENDER_NAME,
 )
@@ -23,7 +24,12 @@ logger = logging.getLogger(__name__)
 # Never send a follow-up to a lead in one of these states (mirrors the social path).
 # Belt-and-suspenders: get_leads_by_status already filters, but this protects against
 # a reply that landed after the status fetch and against future query broadening.
-FOLLOWUP_EXCLUDED_STATUSES = {STATUS_REPLIED, STATUS_CLOSED, STATUS_FAILED}
+# unsubscribed/bounced are terminal do-not-contact states set by the Brevo suppression
+# sync — excluded here so a re-classified lead can never slip into a follow-up batch.
+FOLLOWUP_EXCLUDED_STATUSES = {
+    STATUS_REPLIED, STATUS_CLOSED, STATUS_FAILED,
+    STATUS_UNSUBSCRIBED, STATUS_BOUNCED,
+}
 
 
 def _norm_suppression(suppression) -> tuple[set, set]:

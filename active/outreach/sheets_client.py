@@ -20,7 +20,7 @@ from config import (
     COL_EMAIL, COL_STATUS, COL_LAST_CONTACTED, COL_FOLLOWUP_COUNT,
     COL_NAME, COL_COMPANY, COL_REGION, COL_FACEBOOK_URL, COL_LINKEDIN_URL,
     OLOG_LEAD_EMAIL, OLOG_STAGE_NUMBER,
-    STATUS_NEW, STATUS_FAILED,
+    STATUS_NEW, STATUS_FAILED, STATUS_OUTREACH_SENT, STATUS_FOLLOWUP_SENT,
     MAX_FOLLOWUPS,
 )
 
@@ -198,6 +198,74 @@ def get_suppression_set() -> tuple[set[str], set[str]]:
             domains.add(row[1].strip().lower().lstrip("@"))
     logger.info(f"[SHEETS] Suppression list loaded: {len(emails)} emails, {len(domains)} domains.")
     return emails, domains
+
+
+SUPPRESSION_HEADERS = ["email", "domain", "reason", "date"]
+
+
+def append_suppression(entries: list[dict]) -> int:
+    """Append do-not-contact addresses to the 'Suppression' tab (auto-created if absent).
+
+    entries: list of {"email": str, "reason": str, "blocked_at": str}. Emails already on
+    the list (via get_suppression_set) are skipped, so this is idempotent — safe to run
+    every Phase 2 run. Column A = email (the exact-match key the send gate reads); column B
+    (domain) is left blank on purpose so we suppress the individual address, not the whole
+    company. Columns C/D (reason, date) are audit-only — get_suppression_set ignores them.
+    Written in a single append_rows batch. Returns the number of NEW rows appended."""
+    cleaned = []
+    seen_this_call: set[str] = set()
+    for e in entries:
+        email = (e.get("email") or "").strip().lower()
+        if not email or "@" not in email or email in seen_this_call:
+            continue
+        seen_this_call.add(email)
+        cleaned.append(e)
+    if not cleaned:
+        return 0
+
+    ensure_headers("Suppression", SUPPRESSION_HEADERS)
+    existing_emails, _ = get_suppression_set()
+    new_rows = [
+        [(e.get("email") or "").strip().lower(), "",
+         (e.get("reason") or "").strip(), (e.get("blocked_at") or "").strip()]
+        for e in cleaned
+        if (e.get("email") or "").strip().lower() not in existing_emails
+    ]
+    if not new_rows:
+        logger.info("[SHEETS] Suppression sync: no new addresses to append.")
+        return 0
+
+    ws = _get_sheet("Suppression")
+    _with_backoff(ws.append_rows, new_rows, value_input_option="RAW")
+    logger.info(f"[SHEETS] Suppression sync: appended {len(new_rows)} new address(es).")
+    return len(new_rows)
+
+
+def mark_leads_suppressed(email_to_status: dict[str, str]) -> int:
+    """Flip Leads rows for suppressed addresses to a terminal status in one batched write.
+
+    email_to_status maps a lowercase email → terminal status (unsubscribed / bounced).
+    Only rows currently in an ACTIVE state (new / outreach_sent / followup_sent) are
+    touched — a lead that already replied/closed is never overwritten. Mirrors the single
+    batch_update pattern in reset_smtp_failures. Returns the number of rows updated."""
+    if not email_to_status:
+        return 0
+    active = {STATUS_NEW, STATUS_OUTREACH_SENT, STATUS_FOLLOWUP_SENT}
+    lookup = {k.strip().lower(): v for k, v in email_to_status.items()}
+    ws = _get_sheet("Leads")
+    rows = _with_backoff(ws.get_all_values)
+    updates = []
+    for i, row in enumerate(rows[1:], start=2):
+        if len(row) <= COL_STATUS:
+            continue
+        email = row[COL_EMAIL].strip().lower() if len(row) > COL_EMAIL else ""
+        if email in lookup and row[COL_STATUS].strip().lower() in active:
+            updates.append({"range": gspread.utils.rowcol_to_a1(i, COL_STATUS + 1),
+                            "values": [[lookup[email]]]})
+    if updates:
+        _with_backoff(ws.batch_update, updates, value_input_option="RAW")
+        logger.info(f"[SHEETS] Marked {len(updates)} lead(s) as suppressed (unsubscribed/bounced).")
+    return len(updates)
 
 
 def get_leads_raw_values() -> list[list[str]]:
