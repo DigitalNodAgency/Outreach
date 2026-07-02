@@ -329,11 +329,15 @@ def run_followup_outreach(outreach_log_cache: set, suppression=None) -> dict:
 
         variant = plans.get((prefix, touch_number), {}).get(email.lower())
         body_tpl = variant["body"] if variant else flat_body
-        # Subject: thread off the lead's own Touch-1 subject when this touch is a Re:
-        # thread; otherwise use the variant's fresh subject (e.g. breakup) or the flat one.
+        # Subject: thread EVERY follow-up (including the breakup) off the lead's own Touch-1
+        # subject. A fresh-subject follow-up from a young sending domain reads to Gmail as a
+        # brand-new cold email and gets filtered to Promotions / archived out of the inbox,
+        # whereas a Re: reply rides the existing (engaged) conversation and lands in Primary.
+        # This is exactly why Touches 2-3 (Re:) arrived but a fresh-subject breakup did not.
+        # Falls back to the variant's / flat subject only when Touch 1 isn't on record.
         recall = stage1_subjects.get(email.lower())
-        if flat_subject.lower().startswith("re:") and recall:
-            subject_tpl = f"Re: {recall}"
+        if recall:
+            subject_tpl = recall if recall.lower().startswith("re:") else f"Re: {recall}"
         elif variant and variant.get("subject"):
             subject_tpl = variant["subject"]
         else:

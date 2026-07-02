@@ -57,12 +57,19 @@ def main() -> int:
     # Step 2 — Poll replies FIRST so any lead who replied is marked status=replied
     # before follow-up (Touch 2+) eligibility is evaluated. Non-fatal: IMAP issues must not
     # block outreach.
+    reply_poll_ok = False
     try:
         reply_stats = run_reply_logger()
         logger.info(f"[MAIN] Reply poll: {reply_stats}")
+        # Only trust the poll if it completed without IMAP errors. A failed/errored poll
+        # means a lead who replied may NOT be marked status=replied yet — so we must not
+        # send follow-ups this run (see Step 6). Touch 1 to brand-new leads is unaffected.
+        reply_poll_ok = reply_stats.get("errors", 0) == 0
+        if not reply_poll_ok:
+            logger.error("[MAIN] Reply poll reported errors — follow-ups will be SKIPPED this run.")
     except Exception as e:
         log_pipeline_error("reply_poll", str(e))
-        logger.warning(f"[MAIN] Reply poll failed (non-fatal): {e}")
+        logger.error(f"[MAIN] Reply poll failed — follow-ups will be SKIPPED this run: {e}")
 
     # Step 3 — Reset leads stuck at failed from previous crashes
     reset_count = reset_smtp_failures()
@@ -95,9 +102,20 @@ def main() -> int:
         log_pipeline_error("initial_outreach", str(e))
         logger.error(f"[MAIN] Initial outreach error: {e}")
 
-    # Step 6 — Follow-up outreach (Touch 2..N, capped by MAX_FOLLOWUPS), only if cap not hit
+    # Step 6 — Follow-up outreach (Touch 2..N, capped by MAX_FOLLOWUPS). Gated on BOTH a
+    # clear daily cap AND a clean reply poll — never chase Touch 2+ when we couldn't verify
+    # who replied (fail-safe, not fail-open: a broken reply poll must not email a lead back
+    # after they already answered).
     followup_stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0}
-    if not initial_stats.get("cap_hit"):
+    if initial_stats.get("cap_hit"):
+        logger.info("[MAIN] Daily cap hit on Touch 1 — skipping follow-ups.")
+    elif not reply_poll_ok:
+        logger.warning("[MAIN] Skipping follow-ups: reply poll was unreliable this run.")
+        log_pipeline_error(
+            "followup_skipped",
+            "Reply poll failed/errored; follow-ups skipped to avoid emailing leads who replied.",
+        )
+    else:
         try:
             followup_stats = run_followup_outreach(outreach_log_cache, suppression)
             logger.info(f"[MAIN] Follow-up outreach: {followup_stats}")
