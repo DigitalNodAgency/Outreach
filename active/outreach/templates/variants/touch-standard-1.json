@@ -2,10 +2,10 @@
   "source": "touch-standard-1",
   "formula": "Social-Proof + PAS (Problem-Agitate-Solve) + Reply-CTA",
   "subject": [
-    "77% of your next client already checked your reviews",
-    "Your next client is reading your reviews first",
     "What prospects see when they Google your agency",
-    "Your reviews are closing deals before you do"
+    "when prospects Google {{company}}",
+    "the reviews prospects see first",
+    "quick thought on your reviews"
   ],
   "opening": [
     "77% of B2B buyers check reviews before they reach out, and a prospect weighing your agency does the same: they Google you, scan your reviews, and read page one. A bad review or an old client dispute sitting there quietly loses you pitches you never even hear about.",

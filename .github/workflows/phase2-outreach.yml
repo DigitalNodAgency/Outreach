@@ -41,6 +41,12 @@ jobs:
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          # IMAP creds for the in-run reply poll (main.py Step 2). Without these, reply_logger
+          # falls back IMAP_PASS -> SMTP_PASS (the Brevo key) and auth-fails against Gmail,
+          # so replies were never detected before follow-ups. Mirror of reply-logger.yml.
+          IMAP_HOST: ${{ secrets.IMAP_HOST }}
+          IMAP_USER: ${{ secrets.GMAIL_SENDER }}
+          IMAP_PASS: ${{ secrets.IMAP_PASS }}
           FOLLOWUP_DELAY_DAYS: ${{ vars.FOLLOWUP_DELAY_DAYS }}
           MAX_FOLLOWUPS: ${{ vars.MAX_FOLLOWUPS }}
           CALENDLY_URL: ${{ vars.CALENDLY_URL }}

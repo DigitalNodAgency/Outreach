@@ -21,7 +21,11 @@ IMAP_HOST = os.getenv("IMAP_HOST", "imap.gmail.com")
 IMAP_PORT = int(os.getenv("IMAP_PORT") or "993")
 IMAP_USER = os.getenv("IMAP_USER", os.getenv("GMAIL_SENDER", ""))
 IMAP_PASS = os.getenv("IMAP_PASS", os.getenv("SMTP_PASS", ""))
-POLL_FOLDER = os.getenv("IMAP_FOLDER", "INBOX")
+# Poll Gmail's All Mail by default so a reply that was archived, tab-filtered, or
+# auto-labeled out of the Inbox is still caught (a reply in any non-INBOX folder used to be
+# invisible). Falls back to INBOX at select() time if the folder can't be opened
+# (non-Gmail host or a localized label). Override with IMAP_FOLDER.
+POLL_FOLDER = os.getenv("IMAP_FOLDER", "[Gmail]/All Mail")
 # Poll one day past the configured follow-up gap so any reply that arrived anywhere
 # within it always halts the sequence before the next touch. Derived from the repo's
 # FOLLOWUP_DELAY_DAYS variable (not hardcoded). `or` guards an empty-string env
@@ -80,11 +84,26 @@ def run_reply_logger() -> dict:
     try:
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         mail.login(IMAP_USER, IMAP_PASS)
-        mail.select(POLL_FOLDER)
     except Exception as e:
         logger.error(f"[REPLY LOGGER] IMAP connection failed: {e}")
         stats["errors"] += 1
         return stats
+
+    # Open the poll folder read-only (never flip messages to seen). Fall back to INBOX if
+    # the configured folder (default "[Gmail]/All Mail") can't be opened.
+    folder_arg = POLL_FOLDER if POLL_FOLDER.upper() == "INBOX" else f'"{POLL_FOLDER}"'
+    status, _ = mail.select(folder_arg, readonly=True)
+    if status != "OK":
+        logger.warning(f"[REPLY LOGGER] Could not open '{POLL_FOLDER}'; falling back to INBOX.")
+        status, _ = mail.select("INBOX", readonly=True)
+        if status != "OK":
+            logger.error("[REPLY LOGGER] Could not open INBOX either.")
+            stats["errors"] += 1
+            try:
+                mail.logout()
+            except Exception:
+                pass
+            return stats
 
     try:
         # Search for unseen messages in the last POLL_DAYS_BACK days
@@ -98,6 +117,7 @@ def run_reply_logger() -> dict:
         message_ids = data[0].split()
         logger.info(f"[REPLY LOGGER] Found {len(message_ids)} messages since {since_date}.")
 
+        unmatched_senders: set[str] = set()
         for msg_id in message_ids:
             try:
                 result, msg_data = mail.fetch(msg_id, "(RFC822)")
@@ -115,6 +135,8 @@ def run_reply_logger() -> dict:
                     from_email = from_raw.strip().lower()
 
                 if from_email not in known_emails:
+                    if from_email:
+                        unmatched_senders.add(from_email)
                     continue
 
                 stats["replies_found"] += 1
@@ -136,6 +158,16 @@ def run_reply_logger() -> dict:
             except Exception as e:
                 logger.error(f"[REPLY LOGGER] Error processing message {msg_id}: {e}")
                 stats["errors"] += 1
+
+        # Diagnostic: if nothing matched, show who IS in this mailbox. If your lead
+        # addresses aren't among these, the poll is reading the wrong mailbox — check
+        # GMAIL_SENDER / IMAP_USER against the address that receives replies (SMTP_FROM).
+        if stats["matched"] == 0 and unmatched_senders:
+            sample = sorted(unmatched_senders)[:15]
+            logger.info(
+                f"[REPLY LOGGER] 0 replies matched. {len(unmatched_senders)} distinct "
+                f"senders seen in '{POLL_FOLDER}' (sample): {sample}"
+            )
 
     finally:
         try:
