@@ -59,10 +59,11 @@ NOTIFY_EMAIL = _require("NOTIFY_EMAIL")
 DAILY_EMAIL_CAP = _int_env("DAILY_EMAIL_CAP", 300)
 FOLLOWUP_DELAY_DAYS = _int_env("FOLLOWUP_DELAY_DAYS", 3)
 # Total touches per lead = highest touch-standard-{N}.txt. Touch 1 counts as
-# followup_count=1, so MAX_FOLLOWUPS=4 ⇒ touches 1-4 (Touch 4 = breakup).
-# GitHub repo variable overrides this default. Raising it only needs a matching
-# touch-standard-{N}.txt; a missing file ends the sequence gracefully (engine closes the lead).
-MAX_FOLLOWUPS = _int_env("MAX_FOLLOWUPS", 4)
+# followup_count=1, so MAX_FOLLOWUPS=5 ⇒ touches 1-5 (v15 PR white-label sequence,
+# all threaded off Touch 1 — no breakup touch). GitHub repo variable overrides this
+# default. Raising it only needs a matching touch-standard-{N}.txt; a missing file ends
+# the sequence gracefully (engine closes the lead).
+MAX_FOLLOWUPS = _int_env("MAX_FOLLOWUPS", 5)
 SEND_DELAY_SECONDS = _float_env("SEND_DELAY_SECONDS", 5)
 SMTP_HEALTH_MIN_SENDS = _int_env("SMTP_HEALTH_MIN_SENDS", 5)
 SMTP_HEALTH_FAIL_THRESHOLD = _float_env("SMTP_HEALTH_FAIL_THRESHOLD", 0.5)
