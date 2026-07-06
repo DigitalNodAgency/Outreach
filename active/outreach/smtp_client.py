@@ -138,9 +138,9 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "", pace
         f"{SMTP_USER[:4]}...@{SMTP_USER.split('@')[1]}" if "@" in SMTP_USER
         else f"{SMTP_USER[:8]}... (no @ found — invalid for Brevo)"
     )
-    pass_len = len(SMTP_PASS)
-    pass_prefix = SMTP_PASS[:8] if pass_len >= 8 else SMTP_PASS
-    logger.info(f"[SMTP] Authenticating as: {user_display} | key_len={pass_len} key_prefix={pass_prefix}")
+    # Never log any of the secret itself (not even its length or prefix) — this line
+    # lands in logs/phase2_run.log, which is uploaded as a 30-day GitHub artifact.
+    logger.info(f"[SMTP] Authenticating as: {user_display} | key_present={bool(SMTP_PASS)}")
 
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
