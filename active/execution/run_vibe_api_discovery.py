@@ -195,7 +195,9 @@ def _build_job_levels() -> list[str]:
             if keyword in token_lower:
                 levels.add(level)
                 break
-    return list(levels) if levels else ["cxo", "partner", "director", "vp"]
+    # Sorted so the resolved list (and the cursor key derived from it) is stable
+    # across processes — a set's iteration order is randomized per PYTHONHASHSEED.
+    return sorted(levels) if levels else ["cxo", "director", "partner", "vp"]
 
 
 def _build_company_sizes() -> list[str]:
@@ -217,7 +219,8 @@ def _build_company_sizes() -> list[str]:
         for bucket, b_lo, b_hi in _EXPLORIUM_SIZE_BUCKETS:
             if lo <= b_hi and hi >= b_lo:
                 sizes.add(bucket)
-    return list(sizes) if sizes else ["1-10", "11-50", "51-200"]
+    # Sorted for a process-stable resolved list / cursor key (see _build_job_levels).
+    return sorted(sizes) if sizes else ["1-10", "11-50", "51-200"]
 
 
 def _build_naics_codes() -> list[str]:
@@ -303,8 +306,19 @@ _SCAN_CAP_MIN = 300   # ...but never fewer than this (covers small targets after
 
 def _filter_key(filters: dict) -> str:
     """Stable short hash of the resolved filter set — the cursor key. Changing the
-    ICP changes the key, so the offset resets to 0 automatically (pivot-safe)."""
-    blob = json.dumps(filters, sort_keys=True)
+    ICP changes the key, so the offset resets to 0 automatically (pivot-safe).
+
+    The key MUST be identical across processes for the same ICP, or the cursor never
+    resumes. Some filter value lists are built from a set, whose iteration order is
+    randomized per process (PYTHONHASHSEED) — so we sort every value list before
+    hashing. Without this, each run computed a different key, fell back to offset 0,
+    and re-scraped the top of the pool every time (the all-dupes bug)."""
+    normalized = {
+        k: {**v, "values": sorted(v["values"])}
+        if isinstance(v, dict) and isinstance(v.get("values"), list) else v
+        for k, v in filters.items()
+    }
+    blob = json.dumps(normalized, sort_keys=True)
     return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
 
