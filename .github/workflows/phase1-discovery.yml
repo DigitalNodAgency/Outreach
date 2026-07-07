@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "17 7 * * 1,4"   # Monday + Thursday 07:17 UTC (off-the-hour: GitHub drops/delays top-of-hour schedules)
   workflow_dispatch:        # manual trigger from Actions tab
+    inputs:
+      max_leads:
+        description: "Override MAX_LEADS_PER_RUN for this run only"
+        required: false
+        default: ""
 
 jobs:
   discovery:
@@ -33,7 +38,7 @@ jobs:
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
-          MAX_LEADS_PER_RUN: ${{ vars.MAX_LEADS_PER_RUN }}
+          MAX_LEADS_PER_RUN: ${{ inputs.max_leads || vars.MAX_LEADS_PER_RUN }}
           ICP_PERSONA: ${{ vars.ICP_PERSONA }}
           ICP_COMPANY_SIZE: ${{ vars.ICP_COMPANY_SIZE }}
           ICP_INDUSTRIES: ${{ vars.ICP_INDUSTRIES }}

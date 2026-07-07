@@ -165,6 +165,21 @@ def get_existing_name_company_pairs() -> set[tuple[str, str]]:
     return pairs
 
 
+def get_all_name_company_pairs() -> set[tuple[str, str]]:
+    """(name_lower, company_lower) pairs for EVERY lead row with a name and company,
+    regardless of email. Used by discovery to skip already-scraped prospects at
+    fetch time (before enrichment), when no email is available to match on."""
+    ws = _get_sheet("Leads")
+    all_rows = _with_backoff(ws.get_all_values)
+    pairs = set()
+    for row in all_rows[1:]:
+        name = row[COL_NAME].strip().lower() if len(row) > COL_NAME else ""
+        company = row[COL_COMPANY].strip().lower() if len(row) > COL_COMPANY else ""
+        if name and company:
+            pairs.add((name, company))
+    return pairs
+
+
 def get_leads_by_status(status: str) -> list[dict]:
     """Return leads matching a specific status value."""
     all_leads = get_all_leads()

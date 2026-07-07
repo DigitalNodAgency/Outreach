@@ -286,6 +286,10 @@ def _source_tag() -> str:
 
 _EXPLORIUM_PAGE_SIZE = 100  # Explorium API hard cap per page
 
+# Bounds page-fetch spend and guards infinite loops when everything is a dupe.
+_SCAN_CAP_MULT = 6    # scan at most target*6 records per run...
+_SCAN_CAP_MIN = 300   # ...but never fewer than this (covers small targets after a cursor reset)
+
 
 # ── Discovery pagination cursor ────────────────────────────────────────────────
 # Explorium returns prospects in a stable order, so fetching page 1 on every run
@@ -354,10 +358,30 @@ def _fetch_page(api_key: str, filters: dict, page: int) -> tuple[list[dict], int
         return [], 0, False
 
 
-def _fetch_prospects(api_key: str, target: int) -> list[dict]:
-    """Fetch up to `target` prospect records via POST /v1/prospects with ICP filters
+def _prospect_pair(prospect: dict) -> tuple[str, str] | None:
+    """(name_lower, company_lower) dedup key for a raw prospect, or None when either
+    field is missing (record is kept; post-enrichment dedup remains the safety net)."""
+    name = (
+        prospect.get("full_name", "")
+        or f"{prospect.get('first_name', '')} {prospect.get('last_name', '')}".strip()
+    ).strip()
+    company = (
+        prospect.get("company_name", "")
+        or prospect.get("organization_name", "")
+    ).strip()
+    if not name or not company:
+        return None
+    return (name.lower(), company.lower())
+
+
+def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[dict], int]:
+    """Fetch up to `target` NEW prospect records via POST /v1/prospects with ICP filters
     from env vars, resuming from the persisted per-ICP offset so each run pulls the
-    NEXT slice of the pool (not the same page-1 prospects every time)."""
+    NEXT slice of the pool (not the same page-1 prospects every time). Prospects whose
+    (name, company) pair is already known (in `known_pairs` or already returned earlier
+    in this same walk) are skipped at fetch time, before enrichment — so a cursor
+    landing on already-scraped records doesn't waste enrichment calls on guaranteed
+    dupes. Returns (prospects, skipped_known)."""
     region_codes = _build_region_codes()
     job_levels = _build_job_levels()
     company_sizes = _build_company_sizes()
@@ -394,7 +418,16 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
     offset = start_offset
     wrapped = False  # wrap to the start at most once per run (guards against a loop)
 
-    while len(all_prospects) < target:
+    # Scan cap bounds how many pool records we'll walk this run — without it, a run
+    # where every remaining record is already known (e.g. right after a cursor
+    # reset landed on already-scraped territory) would page through the entire
+    # pool looking for `target` new ones.
+    scan_cap = max(target * _SCAN_CAP_MULT, _SCAN_CAP_MIN)
+    scanned = 0
+    skipped_known = 0
+    seen_this_run: set = set()
+
+    while len(all_prospects) < target and scanned < scan_cap:
         page = offset // _EXPLORIUM_PAGE_SIZE + 1   # Explorium pages are 1-indexed
         skip = offset % _EXPLORIUM_PAGE_SIZE        # drop records already consumed
         page_prospects, page_total, ok = _fetch_page(api_key, filters, page)
@@ -411,9 +444,18 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
                 wrapped = True
                 continue
             break
-        taken = usable[: target - len(all_prospects)]
-        all_prospects.extend(taken)
-        offset += len(taken)
+        for rec in usable:
+            if len(all_prospects) >= target or scanned >= scan_cap:
+                break
+            scanned += 1
+            offset += 1
+            pair = _prospect_pair(rec)
+            if pair and (pair in known_pairs or pair in seen_this_run):
+                skipped_known += 1
+                continue
+            if pair is not None:
+                seen_this_run.add(pair)
+            all_prospects.append(rec)
         # Stop if we've now consumed the entire pool.
         if total_available and offset >= total_available:
             break
@@ -421,14 +463,21 @@ def _fetch_prospects(api_key: str, target: int) -> list[dict]:
     # Persist the new offset so the next run continues where this one left off.
     _save_cursor(key, offset, total_available)
 
+    if skipped_known > 0:
+        logger.info(
+            f"[VIBE API] Skipped {skipped_known} already-known prospect(s) at fetch "
+            f"time (pre-enrichment) — no enrichment call spent on them."
+        )
+
     if all_prospects:
         logger.debug(f"[VIBE API] First prospect fields: {list(all_prospects[0].keys())}")
         logger.debug(f"[VIBE API] First prospect sample: {all_prospects[0]}")
     logger.info(
         f"[VIBE API] Total fetched: {len(all_prospects)} prospects (target={target}); "
-        f"cursor offset {start_offset} -> {offset} of {total_available}."
+        f"cursor offset {start_offset} -> {offset} of {total_available}; "
+        f"fetch-skipped {skipped_known} already-known."
     )
-    return all_prospects
+    return all_prospects, skipped_known
 
 
 def _enrich_email(api_key: str, prospect_id: str) -> str:
@@ -500,7 +549,7 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
     Discover leads via Explorium REST API and write to Sheets.
     Returns stats dict: new_leads, dupes_skipped, failed, source.
     """
-    from sheets_client import get_existing_emails, append_leads_batch
+    from sheets_client import get_existing_emails, get_all_name_company_pairs, append_leads_batch
 
     stats = {"new_leads": 0, "dupes_skipped": 0, "failed": 0, "source": SOURCE_NAME}
 
@@ -509,9 +558,22 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
         log_pipeline_error(SOURCE_NAME, "VIBE_PROSPECTING_API_KEY not set.")
         return stats
 
-    prospects = _fetch_prospects(api_key, target)
+    # Loaded once up front and reused below (for the post-enrichment _deduplicate call)
+    # so a single run only pays for one Leads-tab read of each kind.
+    existing_emails = get_existing_emails()
+    known_pairs = get_all_name_company_pairs()
+
+    prospects, fetch_skips = _fetch_prospects(api_key, target, known_pairs)
     if not prospects:
-        log_pipeline_error(SOURCE_NAME, "fetch_prospects returned no results.")
+        stats["dupes_skipped"] = fetch_skips
+        if fetch_skips > 0:
+            logger.info(
+                f"[VIBE API] All {fetch_skips} scanned prospects already known — "
+                f"no new prospects in this slice."
+            )
+        else:
+            # Genuinely empty result (API failure, exhausted pool, etc.) — a real error.
+            log_pipeline_error(SOURCE_NAME, "fetch_prospects returned no results.")
         record_source_run(SOURCE_NAME, 0)
         return stats
 
@@ -537,13 +599,13 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
     logger.info(f"[VIBE API] Normalized {len(normalized)} leads, failed {failed}.")
 
     if not normalized:
+        stats["dupes_skipped"] = fetch_skips
         record_source_run(SOURCE_NAME, 0)
         return stats
 
-    existing_emails = get_existing_emails()
     existing_no_email = get_existing_name_company_pairs()
     clean, dupe_count = _deduplicate(normalized, existing_emails, existing_no_email)
-    stats["dupes_skipped"] = dupe_count
+    stats["dupes_skipped"] = fetch_skips + dupe_count
 
     if clean:
         written = append_leads_batch(clean)
@@ -554,7 +616,8 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
     record_source_run(SOURCE_NAME, len(clean))
     logger.info(
         f"[VIBE API] Done. Written: {stats['new_leads']}, "
-        f"Dupes: {dupe_count}, Failed: {failed}"
+        f"Dupes: {stats['dupes_skipped']} (fetch-skipped {fetch_skips} + post-enrich {dupe_count}), "
+        f"Failed: {failed}"
     )
     return stats
 
