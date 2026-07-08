@@ -44,6 +44,12 @@ jobs:
           ICP_INDUSTRIES: ${{ vars.ICP_INDUSTRIES }}
           ICP_REGIONS: ${{ vars.ICP_REGIONS }}
           ICP_DISQUALIFY: ${{ vars.ICP_DISQUALIFY }}
+          # Industry filter (v17): self-labeled LinkedIn category replaces NAICS. Unset →
+          # config default "marketing services,advertising services". Editing this repo
+          # var re-scopes discovery and auto-resets the cursor (filter hash changes).
+          ICP_LINKEDIN_CATEGORIES: ${{ vars.ICP_LINKEDIN_CATEGORIES }}
+          # Credit-free pre-enrichment deny screen on company name. Unset → config default.
+          ICP_DENY_KEYWORDS: ${{ vars.ICP_DENY_KEYWORDS }}
         run: python active/execution/phase1_runner.py
 
       - name: Upload Phase 1 logs
