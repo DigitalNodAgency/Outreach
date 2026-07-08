@@ -24,8 +24,15 @@ from config import (
     ICP_PERSONA,
     ICP_COMPANY_SIZE,
     ICP_INDUSTRIES,
+    ICP_LINKEDIN_CATEGORIES,
+    ICP_DENY_KEYWORDS,
 )
-from pipeline_metrics import log_pipeline_error, record_source_run, record_run_stats
+from pipeline_metrics import (
+    log_pipeline_error,
+    record_source_run,
+    record_run_stats,
+    log_failed_record,
+)
 from ingest_vibe_export import _validate_email, _deduplicate
 from sheets_client import get_existing_name_company_pairs
 from notify import alert_token_exhausted
@@ -120,9 +127,11 @@ _EXPLORIUM_SIZE_BUCKETS = [
 ]
 
 # Industry keyword (lowercase) → NAICS codes.
-# Matched as a substring against the lowercased ICP_INDUSTRIES string, so a
-# single ICP_INDUSTRIES entry can match several keywords; all matched NAICS
-# codes are unioned.
+# LEGACY (retired v17): superseded by the linkedin_category filter (see
+# _build_linkedin_categories). NO LONGER called in the active filter path — inferred
+# NAICS misclassified martech (TapClicks → 541613) and PR firms into the agency pool,
+# and Explorium forbids combining naics_category with linkedin_category. Kept for
+# reference only. Matched as a substring against the lowercased ICP_INDUSTRIES string.
 _INDUSTRY_TO_NAICS = {
     # Marketing / advertising / PR agencies (v13 agency pivot). Codes verified
     # against the live Explorium naics_category taxonomy.
@@ -241,6 +250,55 @@ def _build_naics_codes() -> list[str]:
         logger.warning(f"[VIBE API] No NAICS match for ICP_INDUSTRIES={raw!r}; industry filter omitted.")
         return []
     return sorted(codes)
+
+
+def _build_linkedin_categories() -> list[str]:
+    """Parse ICP_LINKEDIN_CATEGORIES into Explorium linkedin_category filter values.
+
+    This is the PRIMARY industry filter (replaces naics_category, v17). Explorium allows
+    only one of naics / linkedin / google category per query, and the self-labeled
+    LinkedIn category is a much cleaner agency signal than inferred NAICS. Returns [] on
+    unset/placeholder input so the caller omits the filter and warns — never silently
+    broadens the search. Sorted for a process-stable resolved list / cursor key."""
+    raw = (ICP_LINKEDIN_CATEGORIES or "").strip()
+    if not raw or raw.startswith("["):
+        logger.warning("[VIBE API] ICP_LINKEDIN_CATEGORIES unset/placeholder; industry filter omitted.")
+        return []
+    seen: set[str] = set()
+    cats: list[str] = []
+    for token in raw.split(","):
+        c = token.strip().lower()
+        if c and c not in seen:
+            seen.add(c)
+            cats.append(c)
+    return sorted(cats)
+
+
+def _deny_keywords() -> list[str]:
+    """Parse ICP_DENY_KEYWORDS into a lowercase keyword list. Empty → screen disabled."""
+    raw = (ICP_DENY_KEYWORDS or "").strip()
+    if not raw:
+        return []
+    return [k.strip().lower() for k in raw.split(",") if k.strip()]
+
+
+def _icp_deny_reason(prospect: dict, deny: list[str]) -> str:
+    """Return the first deny keyword found in the prospect's COMPANY NAME, else "".
+
+    Credit-free secondary screen — the linkedin_category filter is the primary gate;
+    this catches the occasional off-ICP company (staffing/recruiting/pure-tech) that
+    self-labeled into a marketing/advertising LinkedIn category. Matches the company
+    name only (not personal skills/experience, which are too noisy — an agency owner
+    routinely lists "SaaS"/"software" skills)."""
+    if not deny:
+        return ""
+    name = (prospect.get("company_name", "") or prospect.get("organization_name", "") or "").lower()
+    if not name:
+        return ""
+    for kw in deny:
+        if kw in name:
+            return kw
+    return ""
 
 
 # ── Core API functions ─────────────────────────────────────────────────────────
@@ -388,25 +446,32 @@ def _prospect_pair(prospect: dict) -> tuple[str, str] | None:
     return (name.lower(), company.lower())
 
 
-def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[dict], int]:
+def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[dict], int, int]:
     """Fetch up to `target` NEW prospect records via POST /v1/prospects with ICP filters
     from env vars, resuming from the persisted per-ICP offset so each run pulls the
     NEXT slice of the pool (not the same page-1 prospects every time). Prospects whose
     (name, company) pair is already known (in `known_pairs` or already returned earlier
     in this same walk) are skipped at fetch time, before enrichment — so a cursor
     landing on already-scraped records doesn't waste enrichment calls on guaranteed
-    dupes. Returns (prospects, skipped_known)."""
+    dupes. Prospects failing the ICP deny screen are likewise rejected pre-enrichment.
+    Returns (prospects, skipped_known, icp_rejected)."""
     region_codes = _build_region_codes()
     job_levels = _build_job_levels()
     company_sizes = _build_company_sizes()
-    naics_codes = _build_naics_codes()
+    linkedin_categories = _build_linkedin_categories()
+    deny = _deny_keywords()
     logger.info(
         f"[VIBE API] Filters — regions: {region_codes}, "
-        f"job_levels: {job_levels}, sizes: {company_sizes}, naics: {naics_codes}"
+        f"job_levels: {job_levels}, sizes: {company_sizes}, "
+        f"linkedin_categories: {linkedin_categories}; deny_keywords: {deny}"
     )
 
     # Only include a filter key when its mapper resolved values; an empty list
     # would otherwise risk matching nothing (or being silently ignored).
+    # Industry filter: linkedin_category (self-labeled) REPLACES naics_category (v17).
+    # Explorium permits only ONE of naics/linkedin/google category per query, and the
+    # LinkedIn category is a far cleaner agency signal — inferred NAICS misfiled martech
+    # (e.g. TapClicks → 541613) and PR firms into the pool. See CLAUDE.md v17.
     filters: dict = {}
     if region_codes:
         filters["company_region_country_code"] = {"values": region_codes}
@@ -414,8 +479,8 @@ def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[
         filters["job_level"] = {"values": job_levels}
     if company_sizes:
         filters["company_size"] = {"values": company_sizes}
-    if naics_codes:
-        filters["naics_category"] = {"values": naics_codes}
+    if linkedin_categories:
+        filters["linkedin_category"] = {"values": linkedin_categories}
 
     # Resume from the persisted offset for this exact filter set.
     key = _filter_key(filters)
@@ -439,6 +504,7 @@ def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[
     scan_cap = max(target * _SCAN_CAP_MULT, _SCAN_CAP_MIN)
     scanned = 0
     skipped_known = 0
+    icp_rejected = 0
     seen_this_run: set = set()
 
     while len(all_prospects) < target and scanned < scan_cap:
@@ -467,6 +533,22 @@ def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[
             if pair and (pair in known_pairs or pair in seen_this_run):
                 skipped_known += 1
                 continue
+            # Secondary ICP screen, BEFORE enrichment — denied prospects cost no
+            # enrichment call and don't count toward `target`.
+            deny_kw = _icp_deny_reason(rec, deny)
+            if deny_kw:
+                icp_rejected += 1
+                log_failed_record(
+                    {
+                        "company": rec.get("company_name", ""),
+                        "website": rec.get("company_website", ""),
+                        "name": (rec.get("full_name", "")
+                                 or f"{rec.get('first_name', '')} {rec.get('last_name', '')}".strip()),
+                        "prospect_id": rec.get("prospect_id", ""),
+                    },
+                    reason=f"icp_deny_keyword:{deny_kw}",
+                )
+                continue
             if pair is not None:
                 seen_this_run.add(pair)
             all_prospects.append(rec)
@@ -482,6 +564,11 @@ def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[
             f"[VIBE API] Skipped {skipped_known} already-known prospect(s) at fetch "
             f"time (pre-enrichment) — no enrichment call spent on them."
         )
+    if icp_rejected > 0:
+        logger.info(
+            f"[VIBE API] Rejected {icp_rejected} prospect(s) on the ICP deny screen "
+            f"(pre-enrichment) — logged to failed_records.jsonl."
+        )
 
     if all_prospects:
         logger.debug(f"[VIBE API] First prospect fields: {list(all_prospects[0].keys())}")
@@ -489,9 +576,9 @@ def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[
     logger.info(
         f"[VIBE API] Total fetched: {len(all_prospects)} prospects (target={target}); "
         f"cursor offset {start_offset} -> {offset} of {total_available}; "
-        f"fetch-skipped {skipped_known} already-known."
+        f"fetch-skipped {skipped_known} already-known, {icp_rejected} ICP-denied."
     )
-    return all_prospects, skipped_known
+    return all_prospects, skipped_known, icp_rejected
 
 
 def _enrich_email(api_key: str, prospect_id: str) -> str:
@@ -543,6 +630,13 @@ def _normalize_prospect(prospect: dict, email: str, source_tag: str) -> dict | N
         prospect.get("region_name", "")
         or prospect.get("country_name", "")
     ).strip().upper()
+    # Record the company website in notes for ICP auditability — the /v1/prospects
+    # payload carries no company-industry field, so the website is the best free signal
+    # for eyeballing whether a written lead is a genuine agency after the fact.
+    website = (prospect.get("company_website", "") or "").strip()
+    notes = f"source:{source_tag}"
+    if website:
+        notes += f" | site:{website}"
     return {
         "name": name,
         "email": email.lower(),
@@ -552,7 +646,7 @@ def _normalize_prospect(prospect: dict, email: str, source_tag: str) -> dict | N
         "status": STATUS_NEW,
         "last_contacted": "",
         "followup_count": 0,
-        "notes": f"source:{source_tag}",
+        "notes": notes,
         "facebook_url": prospect.get("facebook_url", prospect.get("facebook", "")).strip(),
         "linkedin_url": prospect.get("linkedin_url", "").strip(),
     }
@@ -565,7 +659,7 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
     """
     from sheets_client import get_existing_emails, get_all_name_company_pairs, append_leads_batch
 
-    stats = {"new_leads": 0, "dupes_skipped": 0, "failed": 0, "source": SOURCE_NAME}
+    stats = {"new_leads": 0, "dupes_skipped": 0, "icp_rejected": 0, "failed": 0, "source": SOURCE_NAME}
 
     api_key = os.getenv("VIBE_PROSPECTING_API_KEY", "").strip()
     if not api_key:
@@ -577,13 +671,14 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
     existing_emails = get_existing_emails()
     known_pairs = get_all_name_company_pairs()
 
-    prospects, fetch_skips = _fetch_prospects(api_key, target, known_pairs)
+    prospects, fetch_skips, icp_rejected = _fetch_prospects(api_key, target, known_pairs)
+    stats["icp_rejected"] = icp_rejected
     if not prospects:
         stats["dupes_skipped"] = fetch_skips
-        if fetch_skips > 0:
+        if fetch_skips > 0 or icp_rejected > 0:
             logger.info(
-                f"[VIBE API] All {fetch_skips} scanned prospects already known — "
-                f"no new prospects in this slice."
+                f"[VIBE API] No new in-ICP prospects in this slice "
+                f"(already-known {fetch_skips}, ICP-denied {icp_rejected})."
             )
         else:
             # Genuinely empty result (API failure, exhausted pool, etc.) — a real error.
@@ -631,7 +726,7 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
     logger.info(
         f"[VIBE API] Done. Written: {stats['new_leads']}, "
         f"Dupes: {stats['dupes_skipped']} (fetch-skipped {fetch_skips} + post-enrich {dupe_count}), "
-        f"Failed: {failed}"
+        f"ICP-denied: {icp_rejected}, Failed: {failed}"
     )
     return stats
 

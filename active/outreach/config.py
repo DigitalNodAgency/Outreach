@@ -209,6 +209,28 @@ ICP_INDUSTRIES = os.getenv("ICP_INDUSTRIES", "[CLIENT_INDUSTRIES]")
 ICP_REGIONS = os.getenv("ICP_REGIONS", "[CLIENT_REGIONS]")
 ICP_DISQUALIFY = os.getenv("ICP_DISQUALIFY", "[CLIENT_DISQUALIFY_CONDITIONS]")
 
+# LinkedIn industry categories — the PRIMARY discovery industry filter (v17).
+# Explorium permits only ONE of naics_category / linkedin_category / google_category
+# per query, and the self-labeled LinkedIn category classifies agencies far more
+# accurately than the inferred NAICS codes did: NAICS misfiled martech (e.g. TapClicks
+# → 541613 "Marketing Consulting") and PR firms into the agency pool. "public relations
+# and communications services" is its OWN LinkedIn category, so filtering on the two
+# agency categories below naturally excludes PR competitors. Comma-separated; an empty
+# injection (GitHub sends an undefined `${{ vars.X }}` as "") falls back to the default
+# via `or` — see _int_env note. Editing this repo var re-scopes discovery with no code
+# change (and auto-resets the discovery cursor, since the filter hash changes).
+ICP_LINKEDIN_CATEGORIES = os.getenv("ICP_LINKEDIN_CATEGORIES") or "marketing services,advertising services"
+
+# Secondary, CREDIT-FREE deny screen. Each keyword is matched (case-insensitive
+# substring) against a prospect's COMPANY NAME before any enrichment call; a match
+# rejects the prospect (logged to failed_records.jsonl, never silently dropped). This
+# is a backstop for the rare off-ICP company (staffing/recruiting/pure-tech) that
+# self-labeled into a marketing/advertising LinkedIn category — the linkedin_category
+# filter above is the primary gate. Keep tokens HIGH-PRECISION: they must not appear in
+# legitimate digital/social agency names (e.g. "saas"/"software" are intentionally NOT
+# defaults — "SaaS marketing agency" is in-ICP). Empty disables the screen.
+ICP_DENY_KEYWORDS = os.getenv("ICP_DENY_KEYWORDS") or "staffing,recruiting,recruitment,software development,web hosting"
+
 # ── File paths (absolute — safe regardless of working directory) ───────────────
 VIBE_EXPORT_CSV = str(_ROOT / "active" / "leads" / "vibe_export.csv")
 RUN_METRICS_TSV = str(_ROOT / "active" / "leads" / "run_metrics.tsv")

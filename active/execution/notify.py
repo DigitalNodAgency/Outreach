@@ -41,6 +41,7 @@ def _send_via_gmail(subject: str, body: str) -> bool:
 def send_run_summary(
     new_leads: int = 0,
     dupes_skipped: int = 0,
+    icp_rejected: int = 0,
     enrichment_results: dict = None,
     verify_results: dict = None,
     social_results: dict = None,
@@ -60,6 +61,7 @@ def send_run_summary(
         "",
         f"New leads written:     {new_leads}",
         f"Duplicates skipped:    {dupes_skipped}",
+        f"Off-ICP rejected:      {icp_rejected}",
         f"Follow-ups staged:     {followup_staged}",
         "",
         "Enrichment results:",

@@ -122,6 +122,7 @@ def main() -> int:
         send_run_summary(
             new_leads=total_new,
             dupes_skipped=total_dupes,
+            icp_rejected=vibe_stats.get("icp_rejected", 0),
             enrichment_results=enrichment_results,
             verify_results=verify_results,
             social_results=social_results,
