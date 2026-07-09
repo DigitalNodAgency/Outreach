@@ -192,6 +192,37 @@ def _build_region_codes() -> list[str]:
     return deduped
 
 
+# country_code filter value → the `country_name` string Explorium puts on prospect
+# records, for the credit-free post-fetch geo screen (_geo_deny_reason).
+_COUNTRY_CODE_TO_NAME = {"us": "united states"}
+
+
+def _build_prospect_countries() -> list[str]:
+    """Parse ICP_REGIONS into PROSPECT-level Explorium country_code filter values.
+
+    company_region_country_code only constrains the COMPANY's location — a
+    US-registered company can employ the founder we actually email from Taiwan or
+    Israel (the v19 leak). This filter constrains the person too; it accepts bare
+    country codes ("us"), unlike the company region filter. Every ICP_REGIONS token
+    that resolves to a US country alias or state name implies prospects must sit in
+    the US. Returns [] on unset/unresolved input so the caller omits the filter and
+    warns — never silently broadens. Sorted for a process-stable cursor key."""
+    raw = ICP_REGIONS.strip()
+    if not raw or raw.startswith("["):
+        return []
+    countries: set[str] = set()
+    for token in raw.split(","):
+        name = token.strip().lower()
+        if name in _COUNTRY_REGION_EXPANSION or name in _STATE_CODE_MAP:
+            countries.add("us")
+    if not countries:
+        logger.warning(
+            f"[VIBE API] No prospect countries resolved from ICP_REGIONS={raw!r}; "
+            "person-level country filter omitted."
+        )
+    return sorted(countries)
+
+
 def _build_job_levels() -> list[str]:
     """Parse ICP_PERSONA env var into Explorium job_level codes. Falls back to cxo+director."""
     raw = ICP_PERSONA.strip()
@@ -299,6 +330,35 @@ def _icp_deny_reason(prospect: dict, deny: list[str]) -> str:
         if kw in name:
             return kw
     return ""
+
+
+def _geo_deny_reason(prospect: dict, allowed_countries: list[str]) -> str:
+    """Return the prospect's country_name when it lies outside `allowed_countries`, else "".
+
+    Credit-free secondary geo screen — the prospect-level country_code filter is the
+    primary gate; this catches records the API filter lets through anyway. A blank or
+    missing country_name PASSES (the filter is primary; never over-drop on absent data)."""
+    if not allowed_countries:
+        return ""
+    country = (prospect.get("country_name", "") or "").strip().lower()
+    if not country:
+        return ""
+    allowed = {_COUNTRY_CODE_TO_NAME.get(c, c) for c in allowed_countries}
+    return "" if country in allowed else country
+
+
+def _log_rejected(rec: dict, reason: str) -> None:
+    """Log a pre-enrichment ICP rejection to failed_records.jsonl."""
+    log_failed_record(
+        {
+            "company": rec.get("company_name", ""),
+            "website": rec.get("company_website", ""),
+            "name": (rec.get("full_name", "")
+                     or f"{rec.get('first_name', '')} {rec.get('last_name', '')}".strip()),
+            "prospect_id": rec.get("prospect_id", ""),
+        },
+        reason=reason,
+    )
 
 
 # ── Core API functions ─────────────────────────────────────────────────────────
@@ -453,15 +513,18 @@ def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[
     (name, company) pair is already known (in `known_pairs` or already returned earlier
     in this same walk) are skipped at fetch time, before enrichment — so a cursor
     landing on already-scraped records doesn't waste enrichment calls on guaranteed
-    dupes. Prospects failing the ICP deny screen are likewise rejected pre-enrichment.
+    dupes. Prospects failing the ICP deny screen or the geo screen (person located
+    outside the ICP countries) are likewise rejected pre-enrichment.
     Returns (prospects, skipped_known, icp_rejected)."""
     region_codes = _build_region_codes()
+    prospect_countries = _build_prospect_countries()
     job_levels = _build_job_levels()
     company_sizes = _build_company_sizes()
     linkedin_categories = _build_linkedin_categories()
     deny = _deny_keywords()
     logger.info(
         f"[VIBE API] Filters — regions: {region_codes}, "
+        f"prospect_countries: {prospect_countries}, "
         f"job_levels: {job_levels}, sizes: {company_sizes}, "
         f"linkedin_categories: {linkedin_categories}; deny_keywords: {deny}"
     )
@@ -475,6 +538,10 @@ def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[
     filters: dict = {}
     if region_codes:
         filters["company_region_country_code"] = {"values": region_codes}
+    if prospect_countries:
+        # Person-level geo gate: the company filter alone admits US companies whose
+        # contact lives abroad — and the contact is who we email (v19 leak).
+        filters["country_code"] = {"values": prospect_countries}
     if job_levels:
         filters["job_level"] = {"values": job_levels}
     if company_sizes:
@@ -533,21 +600,17 @@ def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[
             if pair and (pair in known_pairs or pair in seen_this_run):
                 skipped_known += 1
                 continue
-            # Secondary ICP screen, BEFORE enrichment — denied prospects cost no
+            # Secondary ICP screens, BEFORE enrichment — rejected prospects cost no
             # enrichment call and don't count toward `target`.
             deny_kw = _icp_deny_reason(rec, deny)
             if deny_kw:
                 icp_rejected += 1
-                log_failed_record(
-                    {
-                        "company": rec.get("company_name", ""),
-                        "website": rec.get("company_website", ""),
-                        "name": (rec.get("full_name", "")
-                                 or f"{rec.get('first_name', '')} {rec.get('last_name', '')}".strip()),
-                        "prospect_id": rec.get("prospect_id", ""),
-                    },
-                    reason=f"icp_deny_keyword:{deny_kw}",
-                )
+                _log_rejected(rec, reason=f"icp_deny_keyword:{deny_kw}")
+                continue
+            geo_country = _geo_deny_reason(rec, prospect_countries)
+            if geo_country:
+                icp_rejected += 1
+                _log_rejected(rec, reason=f"non_us_prospect:{geo_country}")
                 continue
             if pair is not None:
                 seen_this_run.add(pair)
