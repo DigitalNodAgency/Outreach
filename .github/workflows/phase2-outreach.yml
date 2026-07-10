@@ -35,7 +35,9 @@ jobs:
     # 75/day ≈ 150 min, 100/day ≈ 200 min. To send more per day, raise the repo
     # var — but a single GitHub job caps at 6 h (~172 sends at 120 s); past that,
     # shrink the gap or split into multiple daily runs.
-    timeout-minutes: ${{ vars.PHASE2_TIMEOUT_MINUTES || 180 }}
+    # The var MUST be a plain integer (e.g. 60). Repo vars are strings, and GitHub
+    # won't coerce them for timeout-minutes — fromJSON does the number conversion.
+    timeout-minutes: ${{ fromJSON(vars.PHASE2_TIMEOUT_MINUTES || '180') }}
 
     steps:
       - name: Checkout repo
