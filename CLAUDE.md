@@ -221,6 +221,10 @@ MAX_FOLLOWUPS          Total touches per lead (default 5). = highest touch-stand
                        the sequence gracefully (engine closes the lead, no failed sends).
 CALENDLY_URL           Client's Calendly booking link injected into templates
 SENDER_NAME            Sender display name for email sign-off (e.g. Mohit Mirchandani)
+DAILY_EMAIL_CAP        Hard ceiling on sends per run (default 300). Set LOW (e.g. 25) to bound
+                       GitHub Actions minutes on a private free plan — wall time ≈ (cap−1) ×
+                       avg send gap, and GitHub bills the pacing sleep. Effective cap =
+                       min(this, warm-up rung, time-budget ceiling).
 PHASE2_TIMEOUT_MINUTES Single knob for run length (default 180, unset-safe). Drives BOTH the
                        workflow `timeout-minutes` (hard kill) and the engine's soft stop
                        (timeout − 15 min). Also bounds sends/run via budget ÷ MAX_SEND_GAP_SECONDS
