@@ -514,9 +514,17 @@ def get_leads_for_enrichment() -> list[dict]:
 
 def advance_followup_staging(delay_days: int) -> list[dict]:
     """
-    Advance followup_count and status for leads eligible for follow-up.
-    Pure date logic. No emails sent.
-    Returns list of staged leads.
+    DEPRECATED — DO NOT CALL. Kept for reference only.
+
+    Advances followup_count and status for delay-eligible leads WITHOUT sending
+    any email. This double-advances the counter: the Phase 2 outreach engine
+    (run_followup_outreach) already advances followup_count only after it actually
+    sends a touch, so calling this first makes the engine send touch (count + 1)
+    and the staged touch's email is silently skipped. It was removed from
+    phase1_runner.py Step 4 (see that file + CLAUDE.md §5). Follow-up sequencing
+    belongs solely to the Phase 2 engine — never re-wire this into a runner.
+
+    Pure date logic. No emails sent. Returns list of staged leads.
     """
     from datetime import timedelta
     all_leads = get_all_leads()

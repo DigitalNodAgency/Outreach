@@ -45,7 +45,6 @@ def send_run_summary(
     enrichment_results: dict = None,
     verify_results: dict = None,
     social_results: dict = None,
-    followup_staged: int = 0,
     errors: list[str] = None,
 ) -> None:
     """Phase 1 summary email to operator."""
@@ -62,7 +61,7 @@ def send_run_summary(
         f"New leads written:     {new_leads}",
         f"Duplicates skipped:    {dupes_skipped}",
         f"Off-ICP rejected:      {icp_rejected}",
-        f"Follow-ups staged:     {followup_staged}",
+        f"Follow-ups:            owned by Phase 2 outreach engine (not staged here)",
         "",
         "Enrichment results:",
         f"  Discovery + email:       Vibe-only (Prospeo/Apify/Serper disabled)",

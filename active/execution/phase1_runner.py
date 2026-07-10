@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "outreach"))
 
-from config import PIPELINE_PAUSED_FLAG, FOLLOWUP_DELAY_DAYS, VIBE_EXPORT_CSV, MAX_LEADS_PER_RUN
+from config import PIPELINE_PAUSED_FLAG, VIBE_EXPORT_CSV, MAX_LEADS_PER_RUN
 from pipeline_metrics import read_pipeline_errors, log_pipeline_error
 from notify import send_run_summary
 
@@ -48,7 +48,6 @@ def main() -> int:
     enrichment_results = {}
     verify_results = {}
     social_results = {}
-    followup_staged = 0
 
     # Step 1 — Vibe Prospecting ingestion (primary source)
     vibe_stats = {"new_leads": 0, "dupes_skipped": 0, "failed": 0}
@@ -106,15 +105,15 @@ def main() -> int:
         log_pipeline_error("social_enrichment", f"{type(e).__name__}: {e}")
         logger.error(f"[PHASE1] Social enrichment error (non-fatal): {type(e).__name__}: {e}")
 
-    # Step 4 — Follow-up staging (advance status/count, no emails sent)
-    try:
-        from sheets_client import advance_followup_staging
-        staged = advance_followup_staging(delay_days=FOLLOWUP_DELAY_DAYS)
-        followup_staged = len(staged)
-        logger.info(f"[PHASE1] Follow-up staged: {followup_staged}")
-    except Exception as e:
-        log_pipeline_error("followup_staging", f"{type(e).__name__}: {e}")
-        logger.error(f"[PHASE1] Follow-up staging error (non-fatal): {type(e).__name__}: {e}")
+    # Step 4 — REMOVED. Follow-up sequencing is owned entirely by the Phase 2
+    # outreach engine (run_followup_outreach), which advances followup_count only
+    # AFTER it actually sends each touch. The old advance_followup_staging() call
+    # here bumped followup_count WITHOUT sending, so Phase 2 then sent touch
+    # (count + 1) and the staged touch's email was silently skipped. Worse, on any
+    # Phase 2 run that sent no follow-ups (daily cap hit, reply-poll fail-safe),
+    # Phase 1 kept bumping the count every Mon/Thu until the lead was CLOSED having
+    # received only 1-2 of its touches. Phase 1 no longer touches follow-up state.
+    # See CLAUDE.md §5.
 
     # Step 5 — Summary email
     errors = [e["message"] for e in read_pipeline_errors(limit=20)]
@@ -126,7 +125,6 @@ def main() -> int:
             enrichment_results=enrichment_results,
             verify_results=verify_results,
             social_results=social_results,
-            followup_staged=followup_staged,
             errors=errors,
         )
     except Exception as e:
