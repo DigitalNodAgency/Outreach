@@ -88,6 +88,16 @@ def reset_session() -> None:
     _session = SMTPSession()
 
 
+def seed_sends_today(count: int) -> None:
+    """Pre-load sends_today from sends a PRIOR run already logged today (UTC), so
+    DAILY_EMAIL_CAP is a true per-calendar-day ceiling shared across multiple daily
+    firings — not a per-run cap that resets every time the workflow fires (redundant
+    cron is a reliability safety net, not a second daily budget). Call once, before
+    any sends this run. Never lowers an already-higher in-process count."""
+    if count > _session.sends_today:
+        _session.sends_today = count
+
+
 def _ramp_cap() -> int:
     """Warm-up-ramp cap. During the warm-up window the cap follows WARMUP_SCHEDULE
     (one rung per WARMUP_STEP_DAYS days), never exceeding DAILY_EMAIL_CAP. Once the

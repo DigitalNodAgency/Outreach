@@ -2,7 +2,24 @@ name: phase2-outreach
 
 on:
   schedule:
-    - cron: "17 10 * * *"    # daily 10:17 UTC — Phase 2 outreach
+    - cron: "17 10 * * *"    # daily 10:17 UTC — Phase 2 outreach (primary)
+    # Redundant same-day catch-up firing, 5h later — a reliability safety net, not a
+    # second daily budget. GitHub `schedule` events are best-effort (fire hours late or
+    # drop entirely) and hosted runners occasionally reject a job outright ("not
+    # acquired by Runner", run #59, 2026-07-09). If the 10:17 firing dropped, drifted,
+    # or died, this one catches up; if 10:17 already cleared the queue, this one is a
+    # ~2-3 min no-op (reply poll + syncs only, nothing due to send). Safe because the
+    # pipeline is idempotent end-to-end: Touch 1 only selects status=new (flipped by a
+    # successful send), Touch 2+ requires last_contacted older than
+    # FOLLOWUP_DELAY_DAYS, and every send is deduped on (email, stage_number) in
+    # outreach_log — a second firing cannot re-send what the first already recorded.
+    # DAILY_EMAIL_CAP is likewise a shared per-day ceiling, not per-firing: main.py
+    # seeds sends_today from outreach_log rows already logged today before either
+    # loop runs (sheets_client.get_outreach_log_cache_and_today_count +
+    # smtp_client.seed_sends_today), so two firings can't add up to 2x the cap.
+    # 5h gap is intentionally > the 180-min run time budget below, so the two firings
+    # can never overlap — DO NOT shrink this gap without also shrinking the budget.
+    - cron: "17 15 * * *"    # daily 15:17 UTC — Phase 2 outreach (catch-up)
   workflow_dispatch:         # manual trigger from Actions tab
 
 jobs:

@@ -14,14 +14,14 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "execution"))
 
 from config import PIPELINE_PAUSED_FLAG, FOLLOWUP_DELAY_DAYS, RUN_TIME_BUDGET_SECONDS
-from smtp_client import get_session, reset_session
+from smtp_client import get_session, reset_session, seed_sends_today
 from outreach_engine import run_initial_outreach, run_followup_outreach
 from reply_logger import run_reply_logger
 from brevo_reconcile import run_reconcile, sync_brevo_suppression
 from sheets_client import (
     reset_smtp_failures,
     dedup_outreach_log,
-    get_outreach_log_cache,
+    get_outreach_log_cache_and_today_count,
     get_suppression_set,
     advance_followup_staging,
 )
@@ -106,8 +106,15 @@ def main() -> int:
         logger.warning(f"[MAIN] Pre-sync failed (non-fatal): {e}")
 
     # Step 4 — Load outreach log cache (dedup key for all sends this run) + the
-    # do-not-contact / suppression list (cross-checked before every send).
-    outreach_log_cache = get_outreach_log_cache()
+    # do-not-contact / suppression list (cross-checked before every send). Also seed
+    # today's send count from outreach_log so DAILY_EMAIL_CAP is a true per-calendar-day
+    # ceiling: with a redundant same-day firing (reliability safety net for dropped/
+    # capacity-failed runs), a later firing must count sends the earlier one already
+    # made, not start fresh at 0 and double the day's volume.
+    outreach_log_cache, sent_today_before_run = get_outreach_log_cache_and_today_count()
+    if sent_today_before_run:
+        seed_sends_today(sent_today_before_run)
+        logger.info(f"[MAIN] {sent_today_before_run} sends already logged today — seeding daily cap.")
     try:
         suppression = get_suppression_set()
     except Exception as e:

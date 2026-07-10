@@ -19,7 +19,7 @@ from config import (
     REMOVED_EMAILS_HEADERS, DISCOVERY_STATE_HEADERS,
     COL_EMAIL, COL_STATUS, COL_LAST_CONTACTED, COL_FOLLOWUP_COUNT,
     COL_NAME, COL_COMPANY, COL_REGION, COL_FACEBOOK_URL, COL_LINKEDIN_URL,
-    OLOG_LEAD_EMAIL, OLOG_STAGE_NUMBER,
+    OLOG_LEAD_EMAIL, OLOG_STAGE_NUMBER, OLOG_SENT_DATE,
     STATUS_NEW, STATUS_FAILED, STATUS_OUTREACH_SENT, STATUS_FOLLOWUP_SENT,
     MAX_FOLLOWUPS,
 )
@@ -629,6 +629,27 @@ def get_outreach_log_cache() -> set:
         if len(row) >= 4:
             cache.add((row[OLOG_LEAD_EMAIL].lower(), row[OLOG_STAGE_NUMBER]))
     return cache
+
+
+def get_outreach_log_cache_and_today_count() -> tuple[set, int]:
+    """One outreach_log read, two results: the (email, stage_number) dedup cache AND
+    how many sends already logged today (UTC). Lets a run seed SMTPSession.sends_today
+    from a PRIOR run's sends the same day, so DAILY_EMAIL_CAP is a true per-calendar-day
+    ceiling shared across multiple daily firings (redundant cron for reliability) rather
+    than a per-run cap that resets each firing. sent_date is stored as a full UTC
+    isoformat() timestamp (outreach_engine._now_iso) — a startswith(today) match is
+    exact and avoids parsing every row."""
+    ws = _get_sheet("outreach_log")
+    rows = _with_backoff(ws.get_all_values)
+    cache = set()
+    today = datetime.now(timezone.utc).date().isoformat()
+    sent_today = 0
+    for row in rows[1:]:
+        if len(row) >= 4:
+            cache.add((row[OLOG_LEAD_EMAIL].lower(), row[OLOG_STAGE_NUMBER]))
+        if len(row) > OLOG_SENT_DATE and row[OLOG_SENT_DATE].startswith(today):
+            sent_today += 1
+    return cache, sent_today
 
 
 def get_stage_subjects(stage_number: int = 1) -> dict[str, str]:
