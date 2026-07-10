@@ -5,6 +5,7 @@ Handles initial outreach (Touch 1) and follow-up outreach (Touch 2..MAX_FOLLOWUP
 
 import logging
 import os
+import time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 
@@ -17,7 +18,7 @@ from config import (
     REGION_TEMPLATE_MAP, DEFAULT_TEMPLATE_PREFIX,
     DAILY_EMAIL_CAP, CALENDLY_URL, SENDER_NAME,
 )
-from smtp_client import send_email, is_cap_hit, get_session
+from smtp_client import send_email, is_cap_hit, get_session, pace_sleep
 
 logger = logging.getLogger(__name__)
 
@@ -122,18 +123,23 @@ def _warmth_of(lead: dict) -> float:
         return 0.0
 
 
-def run_initial_outreach(outreach_log_cache: set, suppression=None) -> dict:
+def run_initial_outreach(outreach_log_cache: set, suppression=None, deadline: float | None = None) -> dict:
     """
     Send Touch 1 to all leads with status=new.
     Updates Sheets status → outreach_sent on success.
-    Halts if daily cap hit or SMTP health degrades.
+    Halts if daily cap hit, SMTP health degrades, or the run's time budget
+    (`deadline`, a time.monotonic() timestamp) is reached — a budget stop is a
+    normal outcome (leads defer to the next run), never an error.
     Skips do-not-contact (suppression) leads and varies copy per lead so no two leads
     in the batch receive identical text.
     """
     from sheets_client import get_leads_by_status, update_lead_status, append_outreach_log
 
     suppression = _norm_suppression(suppression)
-    stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0, "cap_hit": False}
+    stats = {
+        "sent": 0, "failed": 0, "skipped": 0, "suppressed": 0, "cap_hit": False,
+        "time_budget_hit": False, "deferred": 0,
+    }
     leads = get_leads_by_status(STATUS_NEW)
 
     if not leads:
@@ -156,7 +162,19 @@ def run_initial_outreach(outreach_log_cache: set, suppression=None) -> dict:
     for pfx, ems in by_prefix.items():
         plans[pfx] = variation_engine.build_plan(pfx, 1, ems)
 
-    for lead in leads:
+    for i, lead in enumerate(leads):
+        # Graceful time-budget stop: never START a send we may not have time to
+        # record + pace. Deferred leads go out on the next daily run. Deliberately
+        # does NOT touch session.health_degraded — exit code stays 0.
+        if deadline is not None and time.monotonic() >= deadline:
+            stats["time_budget_hit"] = True
+            stats["deferred"] = len(leads) - i
+            logger.info(
+                f"[OUTREACH] Run time budget reached — stopping Touch 1, "
+                f"{stats['deferred']} leads deferred to the next run."
+            )
+            break
+
         if is_cap_hit():
             logger.warning(f"[OUTREACH] Daily cap hit. Stopping Touch 1.")
             stats["cap_hit"] = True
@@ -197,7 +215,11 @@ def run_initial_outreach(outreach_log_cache: set, suppression=None) -> dict:
                 continue
 
         subject, body = _render_template(subject_tpl, body_tpl, name, company)
-        success = send_email(to_email=email, subject=subject, body=body, from_name=SENDER_NAME)
+        # pace=False: the pacing sleep must come AFTER the Sheet writes below, not
+        # inside send_email — a hard kill during a sleep between the SMTP send and
+        # update_lead_status/append_outreach_log strands a sent-but-unrecorded
+        # lead, which the next run would re-send (duplicate email).
+        success = send_email(to_email=email, subject=subject, body=body, from_name=SENDER_NAME, pace=False)
 
         if success:
             now = _now_iso()
@@ -214,6 +236,8 @@ def run_initial_outreach(outreach_log_cache: set, suppression=None) -> dict:
             if variant:
                 variation_engine.log_variant(email, 1, variant)
             stats["sent"] += 1
+            if i < len(leads) - 1:  # no trailing sleep after the batch's last lead
+                pace_sleep(deadline)
         else:
             update_lead_status(email, STATUS_FAILED)
             stats["failed"] += 1
@@ -225,21 +249,23 @@ def run_initial_outreach(outreach_log_cache: set, suppression=None) -> dict:
     return stats
 
 
-def run_followup_outreach(outreach_log_cache: set, suppression=None) -> dict:
+def run_followup_outreach(outreach_log_cache: set, suppression=None, deadline: float | None = None) -> dict:
     """
     Send the next follow-up touch (Touch 2..MAX_FOLLOWUPS) to eligible leads.
     Eligibility: status=outreach_sent or followup_sent AND last_contacted >= FOLLOWUP_DELAY_DAYS ago.
     Touch number = followup_count + 1; loads touch-standard-{N}.txt. The lead is closed
     once followup_count reaches MAX_FOLLOWUPS or no template exists for the next touch.
-    Skips if initial outreach hit the daily cap. Honors the do-not-contact list and
-    varies copy per lead. Re: threaded touches reuse the lead's exact Touch-1 subject.
+    Skips if initial outreach hit the daily cap. Stops gracefully at the run's time
+    budget (`deadline`, time.monotonic() timestamp) — deferred leads go out next run.
+    Honors the do-not-contact list and varies copy per lead. Re: threaded touches
+    reuse the lead's exact Touch-1 subject.
     """
     from sheets_client import (
         get_leads_by_status, update_lead_status, append_outreach_log, get_stage_subjects,
     )
 
     suppression = _norm_suppression(suppression)
-    stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0}
+    stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0, "time_budget_hit": False, "deferred": 0}
 
     if is_cap_hit():
         logger.info("[FOLLOWUP] Daily cap already hit. Skipping follow-up run.")
@@ -261,7 +287,18 @@ def run_followup_outreach(outreach_log_cache: set, suppression=None) -> dict:
     plans = _build_followup_plans(leads)
     stage1_subjects = get_stage_subjects(1)
 
-    for lead in leads:
+    for i, lead in enumerate(leads):
+        # Graceful time-budget stop (mirrors Touch 1). Remaining count is the raw
+        # candidate tail — not all of it is delay-eligible, hence "~" in the summary.
+        if deadline is not None and time.monotonic() >= deadline:
+            stats["time_budget_hit"] = True
+            stats["deferred"] = len(leads) - i
+            logger.info(
+                f"[FOLLOWUP] Run time budget reached — stopping follow-ups, "
+                f"~{stats['deferred']} candidates deferred to the next run."
+            )
+            break
+
         if is_cap_hit():
             logger.warning("[FOLLOWUP] Daily cap hit mid-run. Stopping.")
             break
@@ -350,7 +387,9 @@ def run_followup_outreach(outreach_log_cache: set, suppression=None) -> dict:
             subject_tpl = flat_subject
 
         subject, body = _render_template(subject_tpl, body_tpl, name, company)
-        success = send_email(to_email=email, subject=subject, body=body, from_name=SENDER_NAME)
+        # pace=False: pacing sleep happens AFTER the Sheet writes (see Touch 1 note —
+        # sleeping before them is the duplicate-send window on a hard kill).
+        success = send_email(to_email=email, subject=subject, body=body, from_name=SENDER_NAME, pace=False)
 
         new_count = followup_count + 1
         new_status = STATUS_CLOSED if new_count >= MAX_FOLLOWUPS else STATUS_FOLLOWUP_SENT
@@ -370,6 +409,8 @@ def run_followup_outreach(outreach_log_cache: set, suppression=None) -> dict:
             if variant:
                 variation_engine.log_variant(email, touch_number, variant)
             stats["sent"] += 1
+            if i < len(leads) - 1:  # no trailing sleep after the batch's last lead
+                pace_sleep(deadline)
         else:
             update_lead_status(email, STATUS_FAILED)
             stats["failed"] += 1

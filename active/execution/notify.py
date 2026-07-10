@@ -115,10 +115,19 @@ def send_outreach_summary(
     suppressed_unsub: int = 0,
     suppressed_bounced: int = 0,
     suppressed_new: int = 0,
+    time_budget_hit: bool = False,
+    deferred: int = 0,
 ) -> None:
     """Phase 2 summary email to operator."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     errors = errors or []
+
+    # A time-budget stop is a NORMAL outcome (run ends gracefully before the
+    # workflow's hard timeout; deferred leads go out next run) — informational,
+    # not an alert.
+    budget_line = (
+        f"stopped early, ~{deferred} sends deferred to next run" if time_budget_hit else "ok"
+    )
 
     lines = [
         f"Lead Manager — Phase 2 Outreach Summary",
@@ -128,6 +137,7 @@ def send_outreach_summary(
         f"Follow-up (Touch 2+) sent: {followup_sent}",
         f"Failed sends:             {failed}",
         f"Daily cap hit:            {'YES' if cap_hit else 'no'}",
+        f"Time budget:              {budget_line}",
         f"SMTP health degraded:     {'YES — CHECK IMMEDIATELY' if health_degraded else 'no'}",
         f"Brevo suppressions:       {suppressed_unsub} unsub, {suppressed_bounced} bounced "
         f"({suppressed_new} newly added to Suppression tab)",
