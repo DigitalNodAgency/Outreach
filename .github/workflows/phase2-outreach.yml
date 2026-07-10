@@ -59,6 +59,11 @@ jobs:
           WARMUP_START_DATE: ${{ vars.WARMUP_START_DATE }}
           MIN_SEND_GAP_SECONDS: ${{ vars.MIN_SEND_GAP_SECONDS }}
           MAX_SEND_GAP_SECONDS: ${{ vars.MAX_SEND_GAP_SECONDS }}
+          # Hard ceiling on sends/run (default 300, empty-safe). Set a low value to
+          # bound GitHub Actions minutes on a private-repo free plan — wall time is
+          # ≈ (cap − 1) × avg send gap, and GitHub bills the pacing sleep. The
+          # effective cap is min(this, warm-up rung, time-budget ceiling).
+          DAILY_EMAIL_CAP: ${{ vars.DAILY_EMAIL_CAP }}
           # Same var as the job's timeout-minutes above — one knob drives both the
           # hard kill and the engine's soft stop (timeout − 15 min safety margin).
           # Empty injection is safe: config falls back to the same 180 default.
