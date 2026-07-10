@@ -83,6 +83,12 @@ Reply Logger (11:00 UTC, 1h after outreach):
 - Structuring batches: 10 objects max per Claude Code pass.
 - Never write a lead without a verified email (exception: manual assist rows flagged for enrichment).
 - Never overwrite discovery-sourced contact names. Only Serper-extracted names written if `_is_person_name()` passes.
+- NEVER advance `followup_count`/status in Phase 1. Follow-up sequencing belongs
+  SOLELY to the Phase 2 outreach engine, which bumps the count only AFTER it sends
+  a touch. The old `advance_followup_staging()` Step 4 bumped the count without
+  sending → Phase 2 sent touch (count+1) → the staged touch's email was silently
+  skipped (and under-sent leads got closed early). It was removed; the function is
+  deprecated in `sheets_client.py`. Do not re-wire any staging step into a runner.
 
 **Phase 2 agent (main.py):**
 - Never send Touch 2/3 unless `last_contacted` is at least `FOLLOWUP_DELAY_DAYS` ago.

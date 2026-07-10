@@ -23,7 +23,6 @@ from sheets_client import (
     dedup_outreach_log,
     get_outreach_log_cache_and_today_count,
     get_suppression_set,
-    advance_followup_staging,
 )
 from notify import send_outreach_summary, alert_smtp_degraded
 from pipeline_metrics import read_pipeline_errors, log_pipeline_error
