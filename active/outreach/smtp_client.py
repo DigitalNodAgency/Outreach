@@ -17,6 +17,7 @@ from config import (
     MIN_SEND_GAP_SECONDS, MAX_SEND_GAP_SECONDS,
     SMTP_HEALTH_MIN_SENDS, SMTP_HEALTH_FAIL_THRESHOLD,
     WARMUP_START_DATE, WARMUP_STEP_DAYS, WARMUP_SCHEDULE,
+    RUN_TIME_BUDGET_SECONDS,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,22 @@ def _pacing_gap() -> float:
     if hi < lo:
         return float(lo)
     return random.uniform(lo, hi)
+
+
+def pace_sleep(deadline: float | None = None) -> None:
+    """Randomized inter-send gap for cold lead outreach. The engine calls this
+    AFTER a send is fully recorded in the Sheet (status + outreach_log) — never
+    between the SMTP send and its writes: a hard kill during a sleep in that
+    window strands a sent-but-unrecorded lead, which the next run would re-send
+    (duplicate email). `deadline` is a time.monotonic() timestamp; the sleep is
+    skipped when the gap would cross it, letting the loop's deadline check end
+    the run gracefully instead of oversleeping into the workflow's hard kill."""
+    gap = _pacing_gap()
+    if deadline is not None and time.monotonic() + gap >= deadline:
+        logger.info("[SMTP] Pacing skipped: gap would cross the run time budget.")
+        return
+    logger.info(f"[SMTP] Pacing: sleeping {gap/60:.1f} min before next send.")
+    time.sleep(gap)
 
 
 @dataclass
@@ -71,8 +88,8 @@ def reset_session() -> None:
     _session = SMTPSession()
 
 
-def effective_daily_cap() -> int:
-    """Today's send cap. During the warm-up window the cap follows WARMUP_SCHEDULE
+def _ramp_cap() -> int:
+    """Warm-up-ramp cap. During the warm-up window the cap follows WARMUP_SCHEDULE
     (one rung per WARMUP_STEP_DAYS days), never exceeding DAILY_EMAIL_CAP. Once the
     schedule is exhausted — or no warm-up is configured — it's just DAILY_EMAIL_CAP."""
     if not WARMUP_START_DATE or not WARMUP_SCHEDULE:
@@ -91,6 +108,22 @@ def effective_daily_cap() -> int:
     return min(WARMUP_SCHEDULE[idx], DAILY_EMAIL_CAP)
 
 
+def _budget_send_ceiling() -> int:
+    """Max sends that fit the run's time budget at worst-case pacing
+    (RUN_TIME_BUDGET_SECONDS ÷ MAX_SEND_GAP_SECONDS). Self-governs the daily cap so
+    the warm-up ramp / DAILY_EMAIL_CAP can never outgrow the workflow timeout: the
+    run always ends gracefully instead of being hard-killed mid-send. Floor of 1 so
+    a misconfigured (tiny) budget can't silently zero outreach — the engine's
+    in-loop deadline check is the hard stop."""
+    return max(1, RUN_TIME_BUDGET_SECONDS // max(MAX_SEND_GAP_SECONDS, 1))
+
+
+def effective_daily_cap() -> int:
+    """Today's send cap: the warm-up-ramp cap, additionally bounded by how many
+    paced sends physically fit inside the run's time budget."""
+    return min(_ramp_cap(), _budget_send_ceiling())
+
+
 def cap_remaining() -> int:
     return max(0, effective_daily_cap() - _session.sends_today)
 
@@ -104,9 +137,11 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "", pace
     Send a single email via Brevo SMTP.
     Respects daily cap. Tracks session health.
     Returns True on success, False on failure.
-    After a successful LEAD send (pace=True) sleeps a randomized 5-8 min gap so cold
-    outreach is never a fixed-interval metronome. Operator notifications pass pace=False
-    and only wait the short SEND_DELAY_SECONDS.
+    Pacing: the outreach engine passes pace=False and calls pace_sleep() itself
+    AFTER the send is recorded in the Sheet — sleeping in here (between the SMTP
+    send and the caller's status/log writes) is the duplicate-send window a hard
+    kill exploits. pace=True (legacy default) still paces in-call for any other
+    caller; operator notifications pass pace=False and only wait SEND_DELAY_SECONDS.
     """
     if is_cap_hit():
         logger.warning(f"[SMTP] Daily cap of {effective_daily_cap()} hit. Skipping send to {to_email}.")
@@ -154,9 +189,7 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "", pace
         _session.success_count += 1
         logger.info(f"[SMTP] Sent to {to_email} | subject: {subject[:50]}")
         if pace:
-            gap = _pacing_gap()
-            logger.info(f"[SMTP] Pacing: sleeping {gap/60:.1f} min before next send.")
-            time.sleep(gap)
+            pace_sleep()
         else:
             time.sleep(SEND_DELAY_SECONDS)
         return True

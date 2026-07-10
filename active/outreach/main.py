@@ -8,11 +8,12 @@ Run via GitHub Actions or locally via run_outreach.bat.
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "execution"))
 
-from config import PIPELINE_PAUSED_FLAG, FOLLOWUP_DELAY_DAYS
+from config import PIPELINE_PAUSED_FLAG, FOLLOWUP_DELAY_DAYS, RUN_TIME_BUDGET_SECONDS
 from smtp_client import get_session, reset_session
 from outreach_engine import run_initial_outreach, run_followup_outreach
 from reply_logger import run_reply_logger
@@ -53,6 +54,13 @@ def main() -> int:
 
     # Step 1 — Config validation (hard fail is handled in config.py import)
     logger.info("[MAIN] Config validated.")
+
+    # Run time budget: the send loops stop STARTING sends once this deadline passes,
+    # a safety margin before the workflow's hard `timeout-minutes` kill — so cleanup,
+    # the summary email, and the Brevo post-sync always run and the job exits 0.
+    # Deferred leads simply go out on the next daily run.
+    deadline = time.monotonic() + RUN_TIME_BUDGET_SECONDS
+    logger.info(f"[MAIN] Time budget: {RUN_TIME_BUDGET_SECONDS // 60} min send window this run.")
 
     # Step 2 — Poll replies FIRST so any lead who replied is marked status=replied
     # before follow-up (Touch 2+) eligibility is evaluated. Non-fatal: IMAP issues must not
@@ -108,9 +116,12 @@ def main() -> int:
         suppression = (set(), set())
 
     # Step 5 — Initial outreach (Touch 1)
-    initial_stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0, "cap_hit": False}
+    initial_stats = {
+        "sent": 0, "failed": 0, "skipped": 0, "suppressed": 0, "cap_hit": False,
+        "time_budget_hit": False, "deferred": 0,
+    }
     try:
-        initial_stats = run_initial_outreach(outreach_log_cache, suppression)
+        initial_stats = run_initial_outreach(outreach_log_cache, suppression, deadline=deadline)
         logger.info(f"[MAIN] Initial outreach: {initial_stats}")
     except Exception as e:
         log_pipeline_error("initial_outreach", str(e))
@@ -120,9 +131,13 @@ def main() -> int:
     # clear daily cap AND a clean reply poll — never chase Touch 2+ when we couldn't verify
     # who replied (fail-safe, not fail-open: a broken reply poll must not email a lead back
     # after they already answered).
-    followup_stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0}
+    followup_stats = {"sent": 0, "failed": 0, "skipped": 0, "suppressed": 0, "time_budget_hit": False, "deferred": 0}
     if initial_stats.get("cap_hit"):
         logger.info("[MAIN] Daily cap hit on Touch 1 — skipping follow-ups.")
+    elif initial_stats.get("time_budget_hit"):
+        # Not an error: the graceful stop already fired in Touch 1; don't burn
+        # Sheets reads building a follow-up batch we have no time to send.
+        logger.info("[MAIN] Run time budget reached during Touch 1 — skipping follow-ups this run.")
     elif not reply_poll_ok:
         logger.warning("[MAIN] Skipping follow-ups: reply poll was unreliable this run.")
         log_pipeline_error(
@@ -131,7 +146,7 @@ def main() -> int:
         )
     else:
         try:
-            followup_stats = run_followup_outreach(outreach_log_cache, suppression)
+            followup_stats = run_followup_outreach(outreach_log_cache, suppression, deadline=deadline)
             logger.info(f"[MAIN] Follow-up outreach: {followup_stats}")
         except Exception as e:
             log_pipeline_error("followup_outreach", str(e))
@@ -153,6 +168,8 @@ def main() -> int:
 
     # Step 8 — Summary email
     errors = [e["message"] for e in read_pipeline_errors(limit=20)]
+    time_budget_hit = bool(initial_stats.get("time_budget_hit") or followup_stats.get("time_budget_hit"))
+    deferred = int(initial_stats.get("deferred", 0)) + int(followup_stats.get("deferred", 0))
     try:
         send_outreach_summary(
             initial_sent=initial_stats["sent"],
@@ -164,6 +181,8 @@ def main() -> int:
             suppressed_unsub=suppress_stats["unsub"],
             suppressed_bounced=suppress_stats["bounced"],
             suppressed_new=suppress_stats["suppressed_new"],
+            time_budget_hit=time_budget_hit,
+            deferred=deferred,
         )
     except Exception as e:
         logger.error(f"[MAIN] Failed to send summary email: {e}")

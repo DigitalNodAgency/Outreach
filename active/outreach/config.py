@@ -79,6 +79,22 @@ SMTP_HEALTH_FAIL_THRESHOLD = _float_env("SMTP_HEALTH_FAIL_THRESHOLD", 0.5)
 MIN_SEND_GAP_SECONDS = _int_env("MIN_SEND_GAP_SECONDS", 300)
 MAX_SEND_GAP_SECONDS = _int_env("MAX_SEND_GAP_SECONDS", 480)
 
+# ── Run time budget (graceful stop before the workflow's hard timeout) ─────────
+# PHASE2_TIMEOUT_MINUTES drives BOTH the phase2 workflow's `timeout-minutes` and
+# this soft budget (one repo variable, one knob — keep the 180 fallback here in
+# sync with the YAML's `|| 180`). The engine stops STARTING sends
+# TIME_BUDGET_SAFETY_MINUTES before the hard kill so cleanup, the summary email,
+# and the Brevo post-sync always run and the job exits 0; unsent leads simply go
+# out on the next daily run. The budget also bounds effective_daily_cap()
+# (smtp_client._budget_send_ceiling), so the warm-up ramp / DAILY_EMAIL_CAP can
+# never outgrow the send window — no recurring timeout bumps needed as the ramp
+# climbs.
+PHASE2_TIMEOUT_MINUTES = _int_env("PHASE2_TIMEOUT_MINUTES", 180)
+# Covers job overhead outside Python (checkout + pip install), one in-flight send
+# iteration (send + pacing gap + Sheet writes), and all post-loop steps.
+TIME_BUDGET_SAFETY_MINUTES = 15
+RUN_TIME_BUDGET_SECONDS = max(PHASE2_TIMEOUT_MINUTES - TIME_BUDGET_SAFETY_MINUTES, 10) * 60
+
 # ── Cold-send warm-up ramp ─────────────────────────────────────────────────────
 # Protects domain reputation by ramping the daily send cap up gradually, then
 # settling at DAILY_EMAIL_CAP. The ramp is OFF (effective cap == DAILY_EMAIL_CAP)

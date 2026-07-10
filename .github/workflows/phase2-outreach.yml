@@ -8,12 +8,17 @@ on:
 jobs:
   outreach:
     runs-on: ubuntu-latest
-    # Inter-send pacing is MIN_SEND_GAP_SECONDS..MAX_SEND_GAP_SECONDS (repo vars).
-    # Default 100–120 s/send → budget ≈ daily_cap × 2 min.
-    # 60 min covers warm-up caps (≤50/day) with headroom; raise if cap grows.
-    # NOTE: single GitHub job caps at 6 h; split into smaller runs before scaling
-    # past ~150/day at 120 s/send.
-    timeout-minutes: 60
+    # Hard-kill ceiling, driven by the PHASE2_TIMEOUT_MINUTES repo var (unset → 180).
+    # The Python engine reads the SAME var and stops sending ~15 min before this
+    # (config.RUN_TIME_BUDGET_SECONDS), so runs end gracefully — summary email,
+    # cleanup, and Brevo post-sync always execute; unsent leads defer to tomorrow.
+    # The engine also self-caps sends/run to budget ÷ MAX_SEND_GAP_SECONDS
+    # (≈82 at 180 min / 120 s gaps), so the warm-up ramp can never outgrow this
+    # window. Real pacing math at 100–120 s/send (repo vars): 50/day ≈ 100 min,
+    # 75/day ≈ 150 min, 100/day ≈ 200 min. To send more per day, raise the repo
+    # var — but a single GitHub job caps at 6 h (~172 sends at 120 s); past that,
+    # shrink the gap or split into multiple daily runs.
+    timeout-minutes: ${{ vars.PHASE2_TIMEOUT_MINUTES || 180 }}
 
     steps:
       - name: Checkout repo
@@ -54,6 +59,10 @@ jobs:
           WARMUP_START_DATE: ${{ vars.WARMUP_START_DATE }}
           MIN_SEND_GAP_SECONDS: ${{ vars.MIN_SEND_GAP_SECONDS }}
           MAX_SEND_GAP_SECONDS: ${{ vars.MAX_SEND_GAP_SECONDS }}
+          # Same var as the job's timeout-minutes above — one knob drives both the
+          # hard kill and the engine's soft stop (timeout − 15 min safety margin).
+          # Empty injection is safe: config falls back to the same 180 default.
+          PHASE2_TIMEOUT_MINUTES: ${{ vars.PHASE2_TIMEOUT_MINUTES }}
         run: python active/outreach/main.py
 
       - name: Upload run logs
