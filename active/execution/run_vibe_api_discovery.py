@@ -61,9 +61,16 @@ _US_STATE_CODES = [
     "us-wi", "us-wy", "us-dc",
 ]
 
-# Country-level token (lowercase) → expands to all US region codes.
-# Lets ICP_REGIONS="USA" target the whole country instead of silently
-# falling back to a single state.
+# Canada (v22): same `xx-yy` region-code shape as the US (ISO-3166-2:CA), verified live
+# against `company_region_country_code` (ca-xx returns real Canadian companies, no 422).
+_CANADA_PROVINCE_CODES = [
+    "ca-ab", "ca-bc", "ca-mb", "ca-nb", "ca-nl", "ca-ns", "ca-nt",
+    "ca-nu", "ca-on", "ca-pe", "ca-qc", "ca-sk", "ca-yt",
+]
+
+# Country-level token (lowercase) → expands to that country's region codes.
+# Lets ICP_REGIONS="USA,Canada" target whole countries instead of silently
+# falling back to a single state (or dropping an unrecognized country token).
 _COUNTRY_REGION_EXPANSION = {
     "usa": _US_STATE_CODES,
     "us": _US_STATE_CODES,
@@ -72,6 +79,8 @@ _COUNTRY_REGION_EXPANSION = {
     "united states": _US_STATE_CODES,
     "united states of america": _US_STATE_CODES,
     "america": _US_STATE_CODES,
+    "canada": _CANADA_PROVINCE_CODES,
+    "ca": _CANADA_PROVINCE_CODES,
 }
 
 # State name (lowercase) → Explorium region code
@@ -194,27 +203,30 @@ def _build_region_codes() -> list[str]:
 
 # country_code filter value → the `country_name` string Explorium puts on prospect
 # records, for the credit-free post-fetch geo screen (_geo_deny_reason).
-_COUNTRY_CODE_TO_NAME = {"us": "united states"}
+_COUNTRY_CODE_TO_NAME = {"us": "united states", "ca": "canada"}
 
 
 def _build_prospect_countries() -> list[str]:
     """Parse ICP_REGIONS into PROSPECT-level Explorium country_code filter values.
 
     company_region_country_code only constrains the COMPANY's location — a
-    US-registered company can employ the founder we actually email from Taiwan or
-    Israel (the v19 leak). This filter constrains the person too; it accepts bare
-    country codes ("us"), unlike the company region filter. Every ICP_REGIONS token
-    that resolves to a US country alias or state name implies prospects must sit in
-    the US. Returns [] on unset/unresolved input so the caller omits the filter and
-    warns — never silently broadens. Sorted for a process-stable cursor key."""
+    US/Canada-registered company can employ the founder we actually email from Taiwan
+    or Israel (the v19 leak). This filter constrains the person too; it accepts bare
+    country codes ("us"/"ca"), unlike the company region filter. The country is derived
+    from the RESOLVED region-code prefixes (us-* → "us", ca-* → "ca"), so it always
+    tracks ICP_REGIONS across the US/Canada expansion — never hardcoded. Returns [] on
+    unset/unresolved input so the caller omits the filter and warns — never silently
+    broadens. Sorted for a process-stable cursor key."""
     raw = ICP_REGIONS.strip()
     if not raw or raw.startswith("["):
         return []
     countries: set[str] = set()
     for token in raw.split(","):
         name = token.strip().lower()
-        if name in _COUNTRY_REGION_EXPANSION or name in _STATE_CODE_MAP:
-            countries.add("us")
+        if name in _COUNTRY_REGION_EXPANSION:
+            countries.update(code.split("-", 1)[0] for code in _COUNTRY_REGION_EXPANSION[name])
+        elif name in _STATE_CODE_MAP:
+            countries.add(_STATE_CODE_MAP[name].split("-", 1)[0])
     if not countries:
         logger.warning(
             f"[VIBE API] No prospect countries resolved from ICP_REGIONS={raw!r}; "
@@ -610,7 +622,7 @@ def _fetch_prospects(api_key: str, target: int, known_pairs: set) -> tuple[list[
             geo_country = _geo_deny_reason(rec, prospect_countries)
             if geo_country:
                 icp_rejected += 1
-                _log_rejected(rec, reason=f"non_us_prospect:{geo_country}")
+                _log_rejected(rec, reason=f"out_of_region_prospect:{geo_country}")
                 continue
             if pair is not None:
                 seen_this_run.add(pair)
