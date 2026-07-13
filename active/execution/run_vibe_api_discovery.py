@@ -325,21 +325,44 @@ def _deny_keywords() -> list[str]:
     return [k.strip().lower() for k in raw.split(",") if k.strip()]
 
 
+# Prospect payload fields that carry the free-text JOB TITLE. Explorium's documented
+# /v1/prospects "full" schema exposes `job_title` (distinct from the `job_level` code
+# already read in _compute_warmth_score); the aliases are defensive belt-and-suspenders
+# in the same spirit as company_name/organization_name below (a live field probe was
+# blocked by Explorium credit exhaustion, so we tolerate the documented name plus close
+# variants rather than hard-depend on one key). We deliberately do NOT read skills or
+# experience fields — those are too noisy (an agency owner routinely lists "SaaS"/
+# "software"/"consulting" skills), which would false-drop genuine agencies.
+_TITLE_FIELDS = ("job_title", "title", "job_role")
+
+
+def _prospect_title(prospect: dict) -> str:
+    """First non-empty job-title field on the prospect (lowercased), else ""."""
+    for f in _TITLE_FIELDS:
+        v = (prospect.get(f, "") or "").strip()
+        if v:
+            return v.lower()
+    return ""
+
+
 def _icp_deny_reason(prospect: dict, deny: list[str]) -> str:
-    """Return the first deny keyword found in the prospect's COMPANY NAME, else "".
+    """Return the first deny keyword found in the prospect's COMPANY NAME or JOB TITLE, else "".
 
     Credit-free secondary screen — the linkedin_category filter is the primary gate;
-    this catches the occasional off-ICP company (staffing/recruiting/pure-tech) that
-    self-labeled into a marketing/advertising LinkedIn category. Matches the company
-    name only (not personal skills/experience, which are too noisy — an agency owner
-    routinely lists "SaaS"/"software" skills)."""
+    this catches the occasional off-ICP record (staffing/recruiting/pure-tech company, or
+    a solo consultant/fractional exec) that self-labeled into a marketing/advertising
+    LinkedIn category. Screens the company name AND the job title (the title catches the
+    individual buyer who is not an agency — e.g. a "Fractional CMO" or "Marketing
+    Consultant"), but NOT personal skills/experience, which are too noisy (an agency
+    owner routinely lists "SaaS"/"software" skills)."""
     if not deny:
         return ""
     name = (prospect.get("company_name", "") or prospect.get("organization_name", "") or "").lower()
-    if not name:
+    title = _prospect_title(prospect)
+    if not name and not title:
         return ""
     for kw in deny:
-        if kw in name:
+        if kw in name or kw in title:
             return kw
     return ""
 
@@ -371,6 +394,54 @@ def _log_rejected(rec: dict, reason: str) -> None:
         },
         reason=reason,
     )
+
+
+def _log_off_icp_lead(lead: dict, detail: str) -> None:
+    """Log a post-dedup ICP-gate rejection (a normalized lead) to failed_records.jsonl."""
+    log_failed_record(
+        {
+            "company": lead.get("company", ""),
+            "name": lead.get("name", ""),
+            "email": lead.get("email", ""),
+            "region": lead.get("region", ""),
+            "detail": detail,
+        },
+        reason="icp_mismatch",
+    )
+
+
+def _screen_deduped_leads(clean: list[dict], deny: list[str],
+                          allowed_countries: list[str]) -> tuple[list[dict], int]:
+    """Final ICP gate: re-screen already-deduped leads immediately before the Sheets
+    write, dropping any that fail the deny screen (off-ICP company name / job title) or
+    the geo screen (contact outside the ICP countries).
+
+    A safety net BEHIND the fetch-time screen — it re-checks what is actually about to be
+    written, catching anything that slipped through (and future callers of _deduplicate
+    that skip the fetch-time gate). Each drop is logged to failed_records.jsonl with
+    reason `icp_mismatch`; the caller counts the returned rejects into the Phase 1
+    summary's Off-ICP line. The transient `_screen` probe (raw company/title/country the
+    normalized row no longer carries) is popped here so it never reaches the write.
+    Returns (kept_leads, rejected_count)."""
+    kept: list[dict] = []
+    rejected = 0
+    for lead in clean:
+        probe = lead.pop("_screen", {}) or {}
+        detail = ""
+        kw = _icp_deny_reason(probe, deny)
+        if kw:
+            detail = f"deny_keyword:{kw}"
+        else:
+            geo = _geo_deny_reason(probe, allowed_countries)
+            if geo:
+                detail = f"out_of_region:{geo}"
+        if detail:
+            rejected += 1
+            _log_off_icp_lead(lead, detail)
+            logger.info(f"[VIBE API] Post-dedup ICP gate dropped {lead.get('company', '')!r} ({detail}).")
+            continue
+        kept.append(lead)
+    return kept, rejected
 
 
 # ── Core API functions ─────────────────────────────────────────────────────────
@@ -724,6 +795,14 @@ def _normalize_prospect(prospect: dict, email: str, source_tag: str) -> dict | N
         "notes": notes,
         "facebook_url": prospect.get("facebook_url", prospect.get("facebook", "")).strip(),
         "linkedin_url": prospect.get("linkedin_url", "").strip(),
+        # Transient (underscore-prefixed) — the raw fields the post-dedup ICP gate
+        # re-screens on. append_leads_batch reads only the named columns above, so this
+        # key is ignored at write time; the gate pops it after screening regardless.
+        "_screen": {
+            "company_name": company,
+            "job_title": _prospect_title(prospect),
+            "country_name": (prospect.get("country_name", "") or "").strip(),
+        },
     }
 
 
@@ -790,6 +869,16 @@ def run_vibe_api_discovery(target: int = 100) -> dict:
     existing_no_email = get_existing_name_company_pairs()
     clean, dupe_count = _deduplicate(normalized, existing_emails, existing_no_email)
     stats["dupes_skipped"] = fetch_skips + dupe_count
+
+    # Final ICP gate: re-screen the deduped leads immediately before the write and drop
+    # any off-ICP survivor (deny keyword in company/title, or contact out of region). The
+    # deny/geo screens are NOT part of the filter set (see _fetch_prospects), so this
+    # never rotates the discovery cursor. Rejects fold into the Off-ICP summary line.
+    clean, postdedup_rejected = _screen_deduped_leads(
+        clean, _deny_keywords(), _build_prospect_countries()
+    )
+    icp_rejected += postdedup_rejected
+    stats["icp_rejected"] = icp_rejected
 
     if clean:
         written = append_leads_batch(clean)

@@ -238,14 +238,21 @@ ICP_DISQUALIFY = os.getenv("ICP_DISQUALIFY", "[CLIENT_DISQUALIFY_CONDITIONS]")
 ICP_LINKEDIN_CATEGORIES = os.getenv("ICP_LINKEDIN_CATEGORIES") or "marketing services,advertising services"
 
 # Secondary, CREDIT-FREE deny screen. Each keyword is matched (case-insensitive
-# substring) against a prospect's COMPANY NAME before any enrichment call; a match
-# rejects the prospect (logged to failed_records.jsonl, never silently dropped). This
-# is a backstop for the rare off-ICP company (staffing/recruiting/pure-tech) that
-# self-labeled into a marketing/advertising LinkedIn category — the linkedin_category
-# filter above is the primary gate. Keep tokens HIGH-PRECISION: they must not appear in
-# legitimate digital/social agency names (e.g. "saas"/"software" are intentionally NOT
-# defaults — "SaaS marketing agency" is in-ICP). Empty disables the screen.
-ICP_DENY_KEYWORDS = os.getenv("ICP_DENY_KEYWORDS") or "staffing,recruiting,recruitment,software development,web hosting"
+# substring) against BOTH a prospect's COMPANY NAME and their JOB TITLE before any
+# enrichment call; a match rejects the prospect (logged to failed_records.jsonl, never
+# silently dropped). This is a backstop for the off-ICP record (staffing/recruiting/
+# pure-tech company, or a solo consultant/fractional exec) that self-labeled into a
+# marketing/advertising LinkedIn category — the linkedin_category filter above is the
+# primary gate. The consultant/fractional/freelance tokens catch the individual buyer
+# who is NOT an agency (e.g. a "Fractional CMO" or "Marketing Consultant" — an off-ICP
+# consultant lead that reached the sheet, the failure this screen was hardened for).
+# Keep tokens HIGH-PRECISION: they must not appear in legitimate digital/social agency
+# names or agency-owner titles (e.g. "saas"/"software" are intentionally NOT defaults —
+# "SaaS marketing agency" is in-ICP). Empty disables the screen.
+ICP_DENY_KEYWORDS = os.getenv("ICP_DENY_KEYWORDS") or (
+    "staffing,recruiting,recruitment,software development,web hosting,"
+    "consultant,consulting,consultancy,fractional,freelance"
+)
 
 # ── File paths (absolute — safe regardless of working directory) ───────────────
 VIBE_EXPORT_CSV = str(_ROOT / "active" / "leads" / "vibe_export.csv")
