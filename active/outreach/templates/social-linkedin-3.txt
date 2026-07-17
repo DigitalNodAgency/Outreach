@@ -1,5 +1,0 @@
-Hi {{name}}, last one from me so I'm not a pain. We recently helped an agency clean up their Google profile and land a couple of guaranteed press placements they now feature on their site, and it's helped them close pitches faster. If you'd like the same, you can schedule a call here: https://calendly.com/mohitdm
-
-If not, no worries, I'll close it out.
-
-{{sender_name}}

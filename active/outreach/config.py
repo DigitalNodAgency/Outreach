@@ -171,11 +171,6 @@ REPLY_LOG_HEADERS = [
     "lead_email", "lead_name", "reply_date", "subject", "snippet"
 ]
 
-# Social log tab
-SOCIAL_LOG_HEADERS = [
-    "lead_email", "lead_name", "platform", "profile_url", "sent_date", "status", "notes", "touch_number"
-]
-
 # Removed Emails tab — audit trail for BillionVerify-rejected addresses.
 REMOVED_EMAILS_HEADERS = [
     "email", "name", "company", "bv_status", "bv_reason", "removed_date"
@@ -216,12 +211,6 @@ STATUS_BOUNCED = "bounced"
 # ── Discovery ─────────────────────────────────────────────────────────────────
 MAX_LEADS_PER_RUN = _int_env("MAX_LEADS_PER_RUN", 100)
 STRUCTURING_BATCH_SIZE = 10
-
-# ── PhantomBuster (social outreach) ───────────────────────────────────────────
-PHANTOMBUSTER_API_KEY = os.getenv("PHANTOMBUSTER_API_KEY", "")
-PHANTOMBUSTER_LI_PHANTOM_ID = os.getenv("PHANTOMBUSTER_LI_PHANTOM_ID", "")
-PHANTOMBUSTER_LI_SESSION_COOKIE = os.getenv("PHANTOMBUSTER_LI_SESSION_COOKIE", "")
-DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
 # ── ICP filters (filled after client onboarding) ───────────────────────────────
 ICP_PERSONA = os.getenv("ICP_PERSONA", "[CLIENT_ICP_PERSONA]")

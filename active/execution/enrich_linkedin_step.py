@@ -37,8 +37,11 @@ _FB_RE = re.compile(
 
 
 def _normalize_linkedin_url(url: str) -> str:
-    from social_engine import _normalize_linkedin_url as _norm
-    return _norm(url)
+    # Inlined from the retired Python social engine (removed with PhantomBuster-native pivot).
+    url = url.strip()
+    if url and not url.startswith("http"):
+        url = "https://" + url
+    return url
 
 
 def _serper_search(query: str, api_key: str, label: str) -> list[dict]:
