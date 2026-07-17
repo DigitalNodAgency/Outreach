@@ -9,7 +9,7 @@
 **What it does:** Two-phase autonomous B2B lead pipeline. Phase 1 handles discovery, structuring, deduplication, and enrichment on a local Windows schedule. Phase 2 handles outreach sequencing, follow-up automation, and Brevo reconciliation via GitHub Actions.
 **Target / Offer (v13 pivot):** US social-media & digital-marketing agencies. Offer = guaranteed PR placements + reputation management (remove policy-violating Google reviews, suppress negative URLs ranking for the agency's brand). Previously HVAC companies in FL/TX/GA/NC/TN.
 **Success metric:** Qualified leads with verified emails reaching `status=outreach_sent` within 24 hours of discovery, with zero duplicate sends and accurate Brevo reconciliation on every run.
-**Stack:** Python 3.11, Google Sheets API, Brevo SMTP + API, GitHub Actions, Windows Task Scheduler, Vibe Prospecting MCP, Prospeo API, Apify Contact Info Scraper, Serper API, Gmail SMTP, PhantomBuster (Facebook + LinkedIn social outreach)
+**Stack:** Python 3.11, Google Sheets API, Brevo SMTP + API, GitHub Actions, Windows Task Scheduler, Vibe Prospecting MCP, Prospeo API, Apify Contact Info Scraper, Serper API, Gmail SMTP. Social outreach runs on PhantomBuster natively (outside this repo — Python social engine removed 2026-07-17).
 **Type:** Freelance Deliverable / AI Agent
 
 ---
@@ -198,7 +198,7 @@ Lessons log: [active/research/lessons.md](active/research/lessons.md)
 - **Last milestone:** Phase 1 made Vibe-only + scheduled-run reliability fixed (v10/v11 | 2026-06-15). Diagnosed missed Mon run = GitHub best-effort `schedule` delay/drop (not disabled/failing); crons moved off top-of-hour; missed run compensated via manual dispatch. Prospeo/Apify/Serper email enrichment removed (was 400-failing + auto-deleting Vibe leads).
 - **Current focus:** DISCOVERY US → US+CANADA, person AND company in-region (v22 | 2026-07-12). Client (Mohit) confirmed expanding to US+Canada (US alone too thin on mid agencies) and clarified "no C-level" = big-brand execs who already have a PR firm, NOT agency owners — so persona is UNCHANGED (agency owners/founders/CEOs ARE our buyers, kept via cxo; big brands excluded by linkedin_category + 11-50 size). Canada added in run_vibe_api_discovery.py: 13 `ca-xx` province codes + `canada`/`ca` tokens on the company-region filter; the v19 person-level `country_code` filter + `country_name` geo-screen made Canada-aware (country derived from resolved region-code prefixes — never hardcoded), so BOTH the agency and the contact must be in-region. Verified live (all checks pass; pool 48,327 US → 52,028 US+CA). GATING repo var Rizan must set: `ICP_REGIONS=USA,Canada` (+ `ICP_DISQUALIFY` → US/Canada). Also told Rizan: PhantomBuster free reset ≈ 30 leads/mo of social = a trickle, not scalable (email stays the engine; social still standby pending the LinkedIn cookie). Prior: HANDS-OFF RELIABILITY (v20-v21 | 2026-07-10). Goal: hand the whole pipeline to client Mohit (non-technical) with zero runs needing a human — reframed from "0% failed runs" (impossible; GitHub hosted runners have real incidents, see run #59) to "0% failures that need a human," via self-healing redundancy. v20 = graceful time-budget stop: night run 2026-07-09 hard-killed at `timeout-minutes: 60` (50/day × 100-120s pacing ≈ 92 min); fix = one PHASE2_TIMEOUT_MINUTES knob (default 180) driving hard kill + engine soft stop, self-governing cap (budget ÷ max gap) so the ramp never outgrows the window, pacing moved AFTER Sheet writes (duplicate-send window closed), budget stop = exit 0 + summary line. v21 = redundant same-day cron (10:17 + 15:17 UTC, ≥4h apart) SUPERSEDES the cron-job.org plan for the hands-off goal — no expiring token, no second account for Mohit to maintain, and it also catches hosted-runner capacity failures that an external dispatch cannot fix. Safe because the pipeline is already idempotent (status machine + outreach_log dedup); DAILY_EMAIL_CAP made a true shared per-day ceiling via a seeded send count so two firings can't add up to 2x volume. Deferred: 1-page non-technical runbook for Mohit (not yet written). Prior: NON-US LEAD LEAK FIXED (v19 | 2026-07-09). The 2026-07-09 run wrote 2 leads with contacts in Taiwan/Israel — the geo filter only ever constrained the COMPANY's location, never the person's. Fix = prospect-level `country_code` filter derived from ICP_REGIONS + credit-free post-fetch `country_name` screen; both foreign leads deleted from the sheet before any send. v18 CONFIRMED LIVE from the Discovery State tab: today's run used key 236f1837 (11-50 + strict linkedin_category, pool 30,816) — Rizan's var flip is in effect. BillionVerify (v12) still pending first live field-shape confirmation.
 - **Pending decisions:** (v22) Set repo var `ICP_REGIONS=USA,Canada` (+ `ICP_DISQUALIFY` → US/Canada), then merge `feat/discovery-add-canada` — code/docs alone do not redirect sourcing. Confirm no account-level Brevo footer double-ups with the baked-in template footer.
-- **TODO next session:** Merge the schedule/Vibe-only PR. Consider external scheduler (cron service → workflow_dispatch API) if GitHub `schedule` drift keeps missing runs. Remove Python social outreach engine (social_main.py, social_engine.py, phantombuster_client.py, social-outreach.yml).
+- **TODO next session:** Merge the schedule/Vibe-only PR. Consider external scheduler (cron service → workflow_dispatch API) if GitHub `schedule` drift keeps missing runs. Python social engine REMOVED 2026-07-17 (was: social_main.py, social_engine.py, phantombuster_client.py, social-outreach.yml) — Rizan to delete the 4 PHANTOMBUSTER_* repo secrets.
 - **Known issues:** GitHub `schedule` events fire hours late / occasionally drop (best-effort) — inherent GitHub limitation, only fully solvable with an external trigger.
 - **Locked choices:** No Apify Places, Serper discovery, SerpAPI, Apify Leads Finder. Prospeo retired (discovery + email enrichment) — Vibe-only. Serper kept for SOCIAL URL enrichment only. Social outreach = PhantomBuster native only (not Python engine).
 
@@ -253,10 +253,8 @@ IMAP_USER                      Mailbox the reply poll logs into — MUST be wher
                                (SMTP_FROM's inbox, e.g. mohit@digitalnod.net). Falls back to
                                GMAIL_SENDER if unset (legacy — wrong mailbox for Brevo sends).
 IMAP_PASS                      App password FOR THE IMAP_USER MAILBOX (not the Gmail one, unless same inbox)
-PHANTOMBUSTER_API_KEY          Client's PhantomBuster API key — social outreach (standby: needs session cookie from Mohit)
-PHANTOMBUSTER_FB_PHANTOM_ID    PhantomBuster Facebook Message Sender phantom ID
-PHANTOMBUSTER_LI_PHANTOM_ID    PhantomBuster LinkedIn Message Sender phantom ID
-PHANTOMBUSTER_LI_SESSION_COOKIE LinkedIn session cookie — required to activate social-outreach.yml (pending Mohit)
+(PHANTOMBUSTER_* secrets retired 2026-07-17 with the Python social engine — delete from
+repo settings; PhantomBuster-native social outreach needs nothing from this repo.)
 ```
 
 ### Phase 2 — GitHub repo variables (non-secret)
@@ -394,9 +392,9 @@ MAX_LEADS_PER_RUN      = 50
   breakup — all of 2-5 thread off Touch 1 via `Re:`). Length is fully `MAX_FOLLOWUPS`-driven.
 - Copy sends VERBATIM: variation engine retired — `templates/variants/` deleted so the engine uses
   the flat `.txt`. Footer baked into each template; Calendly is literal `www.calendly.com/mohitdm`.
-- Social series (PhantomBuster/Python reference copy): `social-linkedin-{1,2,3}.txt` + `social-facebook-1.txt`.
+- Social outreach: PhantomBuster NATIVE only (message copy lives in PhantomBuster, not this
+  repo — Python engine + social templates removed 2026-07-17; see git history for the copy).
 - Supported template tokens (email engine): `{{name}}`, `{{company}}`, `{{calendly_url}}`, `{{sender_name}}`.
-  Social engine substitutes only `{{name}}` + `{{sender_name}}` (keep Calendly as a literal link there).
 - Templates live in: `active/outreach/templates/`
 - All US leads route to the `touch-standard` series via `config.py → REGION_TEMPLATE_MAP` (default prefix).
 

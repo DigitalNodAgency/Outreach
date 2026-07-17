@@ -1,3 +1,0 @@
-Hey {{name}}, hope things are going well at {{company}}! I work with marketing and social media agencies on their online reputation, removing policy-violating Google reviews and landing guaranteed PR placements for their own brand. Happy to share what's been working for a few agencies if you're open to a quick chat.
-
-{{sender_name}}

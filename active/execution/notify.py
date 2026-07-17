@@ -208,31 +208,6 @@ def alert_pipeline_error(stage: str, message: str) -> None:
     )
 
 
-def send_social_summary(touch_stats: list[dict], dry_run: bool = False) -> None:
-    """Social outreach summary email to operator."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    prefix = "[DRY RUN] " if dry_run else ""
-
-    lines = [
-        f"Lead Manager — {prefix}LinkedIn Social Outreach Summary",
-        f"Run time: {now}",
-        "",
-    ]
-    for s in touch_stats:
-        lines.append(
-            f"  Touch {s['touch_number']}: targeted={s['targeted']}, "
-            f"failed={s['failed']}, launched={s.get('launched')}, succeeded={s.get('succeeded')}"
-        )
-
-    total_failed = sum(s["failed"] for s in touch_stats)
-    lines += ["", "No errors." if total_failed == 0 else f"Total failed sends: {total_failed}"]
-
-    _send_via_gmail(
-        subject=f"[Lead Manager] {prefix}Social Outreach Summary — {now}",
-        body="\n".join(lines),
-    )
-
-
 def alert_token_exhausted(source: str, details: str = "") -> None:
     """Alert operator when an API source runs out of credits/quota."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
