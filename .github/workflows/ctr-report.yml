@@ -10,6 +10,11 @@ on:
         default: "7"
         required: false
 
+# Least privilege: these workflows only read the repo (all writes go to Google
+# Sheets / SMTP APIs via secrets, never back to GitHub).
+permissions:
+  contents: read
+
 jobs:
   ctr-report:
     runs-on: ubuntu-latest
@@ -25,7 +30,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install -r requirements.txt
 
       - name: Run CTR report
         env:

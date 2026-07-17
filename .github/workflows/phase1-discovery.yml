@@ -10,6 +10,11 @@ on:
         required: false
         default: ""
 
+# Least privilege: these workflows only read the repo (all writes go to Google
+# Sheets / SMTP APIs via secrets, never back to GitHub).
+permissions:
+  contents: read
+
 jobs:
   discovery:
     runs-on: ubuntu-latest
