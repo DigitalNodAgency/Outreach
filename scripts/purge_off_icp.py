@@ -29,7 +29,7 @@ NOT be auto-detected — target those explicitly with --also-email a@b.com,c@d.c
 --also-email row still passes the same hard safety gate before it can be deleted.
 
 Destructive on the client's live sheet — run the dry run first, then --apply.
-Delete this script after use (one-shot, like seed_test_lead.py).
+Delete this script after use (one-shot).
 
 Usage:
   python scripts/purge_off_icp.py                          # dry run (backup + report)

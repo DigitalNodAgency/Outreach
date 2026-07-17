@@ -48,7 +48,7 @@ def _post(endpoint: str, payload: dict, retries: int = 3) -> Optional[dict]:
                 logger.error(f"[PROSPEO] 400 Bad Request on {endpoint}: {resp.text[:300]}")
                 return None  # not retryable
             if resp.status_code in (401, 403):
-                log_pipeline_error("prospeo", f"Auth error {resp.status_code}: {resp.text}")
+                log_pipeline_error("prospeo", f"Auth error {resp.status_code}: {resp.text[:300]}")
                 return None
             resp.raise_for_status()
             data = resp.json()

@@ -22,6 +22,11 @@ on:
     - cron: "17 15 * * *"    # daily 15:17 UTC — Phase 2 outreach (catch-up)
   workflow_dispatch:         # manual trigger from Actions tab
 
+# Least privilege: these workflows only read the repo (all writes go to Google
+# Sheets / SMTP APIs via secrets, never back to GitHub).
+permissions:
+  contents: read
+
 jobs:
   outreach:
     runs-on: ubuntu-latest

@@ -5,6 +5,11 @@ on:
     - cron: "0 11 * * *"     # daily 11:00 UTC — 1 hour after outreach
   workflow_dispatch:
 
+# Least privilege: these workflows only read the repo (all writes go to Google
+# Sheets / SMTP APIs via secrets, never back to GitHub).
+permissions:
+  contents: read
+
 jobs:
   reply-logger:
     runs-on: ubuntu-latest
