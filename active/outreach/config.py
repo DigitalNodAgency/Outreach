@@ -48,6 +48,11 @@ SMTP_PORT = _int_env("SMTP_PORT", 587)
 SMTP_USER = os.getenv("SMTP_USER", "").strip()
 SMTP_PASS = os.getenv("SMTP_PASS", "").strip()
 SMTP_FROM = os.getenv("SMTP_FROM", "").strip()
+# Optional Reply-To header for outgoing touches. Empty = header omitted (replies go to
+# SMTP_FROM's inbox). INVARIANT: whichever address ends up receiving replies — REPLY_TO
+# if set, else SMTP_FROM — must be the SAME mailbox the reply poll logs into (IMAP_USER),
+# or replies are never detected and follow-ups keep going out after a lead answers.
+REPLY_TO_EMAIL = (os.getenv("REPLY_TO") or "").strip()
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 
 # ── Notifications ──────────────────────────────────────────────────────────────

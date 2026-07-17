@@ -68,9 +68,18 @@ jobs:
           # IMAP creds for the in-run reply poll (main.py Step 2). Without these, reply_logger
           # falls back IMAP_PASS -> SMTP_PASS (the Brevo key) and auth-fails against Gmail,
           # so replies were never detected before follow-ups. Mirror of reply-logger.yml.
+          # INVARIANT: the polled mailbox must be the one replies land in — SMTP_FROM's
+          # inbox (or REPLY_TO's, if set). The IMAP_USER secret overrides the legacy
+          # GMAIL_SENDER fallback for exactly that reason.
           IMAP_HOST: ${{ secrets.IMAP_HOST }}
-          IMAP_USER: ${{ secrets.GMAIL_SENDER }}
+          IMAP_USER: ${{ secrets.IMAP_USER || secrets.GMAIL_SENDER }}
           IMAP_PASS: ${{ secrets.IMAP_PASS }}
+          # Optional Reply-To header on outgoing touches (repo var, empty = header omitted).
+          # If set, it must point at the mailbox IMAP_USER polls.
+          REPLY_TO: ${{ vars.REPLY_TO }}
+          # Optional widened reply-poll window (days). Empty-safe: config falls back to
+          # FOLLOWUP_DELAY_DAYS + 1. Set temporarily (e.g. 60) to backfill missed replies.
+          REPLY_POLL_DAYS_BACK: ${{ vars.REPLY_POLL_DAYS_BACK }}
           FOLLOWUP_DELAY_DAYS: ${{ vars.FOLLOWUP_DELAY_DAYS }}
           MAX_FOLLOWUPS: ${{ vars.MAX_FOLLOWUPS }}
           CALENDLY_URL: ${{ vars.CALENDLY_URL }}

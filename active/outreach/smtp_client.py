@@ -12,7 +12,7 @@ from email.mime.text import MIMEText
 from dataclasses import dataclass, field
 
 from config import (
-    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM,
+    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, REPLY_TO_EMAIL,
     DAILY_EMAIL_CAP, SEND_DELAY_SECONDS,
     MIN_SEND_GAP_SECONDS, MAX_SEND_GAP_SECONDS,
     SMTP_HEALTH_MIN_SENDS, SMTP_HEALTH_FAIL_THRESHOLD,
@@ -170,6 +170,11 @@ def send_email(to_email: str, subject: str, body: str, from_name: str = "", pace
     msg["Subject"] = subject
     msg["From"] = f"{from_name} <{SMTP_FROM}>" if from_name else SMTP_FROM
     msg["To"] = to_email
+    # Optional: route replies to a different mailbox than SMTP_FROM. Only set when the
+    # REPLY_TO repo var is non-empty — and that address must be the mailbox the reply
+    # poll (IMAP_USER) watches, or replies stop being detected (see config.REPLY_TO_EMAIL).
+    if REPLY_TO_EMAIL:
+        msg["Reply-To"] = REPLY_TO_EMAIL
 
     if not SMTP_USER or not SMTP_PASS or not SMTP_FROM:
         err = f"SMTP_USER, SMTP_PASS, or SMTP_FROM is empty — set all three GitHub Secrets."

@@ -44,8 +44,10 @@ Trigger (GitHub Actions)
   → Phase 2 summary email → Brevo post-sync (always)
   → Upload logs as GitHub artifact (30-day retention)
 
-Reply Logger (11:00 UTC, 1h after outreach):
-  → IMAP poll → log inbound replies → Outreach Reply Log sheet
+Reply Logger (11:00 UTC, 1h after outreach; also in-run as Phase 2 Step 2):
+  → Reply Log reconcile sweep (kill-switch: any email in the tab → active lead flipped
+    to replied; runs even if IMAP is down)
+  → IMAP poll → dedup vs tab → log NEW inbound replies → status=replied
 ```
 
 ### Architectural Decisions (numbered, append only)
@@ -128,7 +130,15 @@ Reply Logger (11:00 UTC, 1h after outreach):
 
 **Reply logger (reply_logger.py):**
 - IMAP poll only. Never sends email.
-- Runs 1h after outreach (11:00 UTC). Logs to Outreach Reply Log sheet.
+- Runs 1h after outreach (11:00 UTC) + in-run before follow-ups (Phase 2 Step 2).
+- MAILBOX INVARIANT: IMAP_USER must be the mailbox replies land in — SMTP_FROM's inbox
+  (or REPLY_TO's, if that repo var is set). Polling any other inbox = replies never seen
+  (root cause of the 2026-07 "lead replied but kept getting touches" incident).
+- Reply Log tab = operator kill-switch: the reconcile sweep (runs first, IMAP-independent)
+  flips any still-active lead whose email is in column A to replied. Manual alternative:
+  `python scripts/mark_lead_replied.py <email> --apply`.
+- IMAP appends are deduped against the tab on (email, reply_date, subject) — the SINCE
+  window re-scans the same messages daily; never re-append.
 
 ---
 
@@ -238,8 +248,11 @@ BREVO_API_KEY                  Client's Brevo API key
 GMAIL_SENDER                   Client's Gmail address for operator alerts
 GMAIL_APP_PASSWORD             Client's Gmail App Password (same value as IMAP_PASS if same inbox)
 NOTIFY_EMAIL                   Client's email for summary reports
-IMAP_HOST                      imap.gmail.com (fixed)
-IMAP_PASS                      Client's Gmail App Password for reply logger (same as GMAIL_APP_PASSWORD if same inbox)
+IMAP_HOST                      IMAP server hostname ONLY (imap.gmail.com for Gmail/Workspace) — never an email address
+IMAP_USER                      Mailbox the reply poll logs into — MUST be where replies land
+                               (SMTP_FROM's inbox, e.g. mohit@digitalnod.net). Falls back to
+                               GMAIL_SENDER if unset (legacy — wrong mailbox for Brevo sends).
+IMAP_PASS                      App password FOR THE IMAP_USER MAILBOX (not the Gmail one, unless same inbox)
 PHANTOMBUSTER_API_KEY          Client's PhantomBuster API key — social outreach (standby: needs session cookie from Mohit)
 PHANTOMBUSTER_FB_PHANTOM_ID    PhantomBuster Facebook Message Sender phantom ID
 PHANTOMBUSTER_LI_PHANTOM_ID    PhantomBuster LinkedIn Message Sender phantom ID
@@ -262,6 +275,11 @@ PHASE2_TIMEOUT_MINUTES Single knob for run length (default 180, unset-safe). Dri
                        workflow `timeout-minutes` (hard kill) and the engine's soft stop
                        (timeout − 15 min). Also bounds sends/run via budget ÷ MAX_SEND_GAP_SECONDS
                        (≈82 at 180/120s). Raise it to send more per day; 6h GitHub job ceiling.
+REPLY_TO               Optional Reply-To header on outgoing touches (empty = omitted, replies go
+                       to SMTP_FROM). If set, MUST equal the mailbox IMAP_USER polls.
+REPLY_POLL_DAYS_BACK   Optional reply-poll window in days (empty = FOLLOWUP_DELAY_DAYS + 1).
+                       Set temporarily (e.g. 60) to backfill replies missed while the poll
+                       watched the wrong mailbox; unset afterwards.
 ```
 
 ---

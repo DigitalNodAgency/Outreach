@@ -65,6 +65,7 @@ def main() -> int:
     # before follow-up (Touch 2+) eligibility is evaluated. Non-fatal: IMAP issues must not
     # block outreach.
     reply_poll_ok = False
+    reply_stats = {}
     try:
         reply_stats = run_reply_logger()
         logger.info(f"[MAIN] Reply poll: {reply_stats}")
@@ -189,6 +190,10 @@ def main() -> int:
             suppressed_new=suppress_stats["suppressed_new"],
             time_budget_hit=time_budget_hit,
             deferred=deferred,
+            replies_matched=reply_stats.get("matched", 0),
+            replies_reconciled=reply_stats.get("reconciled", 0),
+            reply_update_failures=reply_stats.get("status_update_failures", 0),
+            reply_dupes_skipped=reply_stats.get("duplicates_skipped", 0),
         )
     except Exception as e:
         logger.error(f"[MAIN] Failed to send summary email: {e}")

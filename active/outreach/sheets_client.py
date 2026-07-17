@@ -21,7 +21,7 @@ from config import (
     COL_NAME, COL_COMPANY, COL_REGION, COL_FACEBOOK_URL, COL_LINKEDIN_URL,
     OLOG_LEAD_EMAIL, OLOG_STAGE_NUMBER, OLOG_SENT_DATE,
     STATUS_NEW, STATUS_FAILED, STATUS_OUTREACH_SENT, STATUS_FOLLOWUP_SENT,
-    MAX_FOLLOWUPS,
+    STATUS_REPLIED, MAX_FOLLOWUPS,
 )
 
 logger = logging.getLogger(__name__)
@@ -256,13 +256,14 @@ def append_suppression(entries: list[dict]) -> int:
     return len(new_rows)
 
 
-def mark_leads_suppressed(email_to_status: dict[str, str]) -> int:
-    """Flip Leads rows for suppressed addresses to a terminal status in one batched write.
+def _set_status_if_active(email_to_status: dict[str, str], log_label: str) -> int:
+    """Flip Leads rows to a terminal status in one batched write — ACTIVE rows only.
 
-    email_to_status maps a lowercase email → terminal status (unsubscribed / bounced).
-    Only rows currently in an ACTIVE state (new / outreach_sent / followup_sent) are
-    touched — a lead that already replied/closed is never overwritten. Mirrors the single
-    batch_update pattern in reset_smtp_failures. Returns the number of rows updated."""
+    email_to_status maps a lowercase email → terminal status. Only rows currently in an
+    ACTIVE state (new / outreach_sent / followup_sent) are touched — a lead that already
+    replied/closed/unsubscribed is never overwritten, which also makes repeated calls
+    idempotent. Mirrors the single batch_update pattern in reset_smtp_failures.
+    Returns the number of rows updated."""
     if not email_to_status:
         return 0
     active = {STATUS_NEW, STATUS_OUTREACH_SENT, STATUS_FOLLOWUP_SENT}
@@ -279,8 +280,22 @@ def mark_leads_suppressed(email_to_status: dict[str, str]) -> int:
                             "values": [[lookup[email]]]})
     if updates:
         _with_backoff(ws.batch_update, updates, value_input_option="RAW")
-        logger.info(f"[SHEETS] Marked {len(updates)} lead(s) as suppressed (unsubscribed/bounced).")
+        logger.info(f"[SHEETS] Marked {len(updates)} lead(s) as {log_label}.")
     return len(updates)
+
+
+def mark_leads_suppressed(email_to_status: dict[str, str]) -> int:
+    """Flip active Leads rows for suppressed addresses (unsubscribed / bounced)."""
+    return _set_status_if_active(email_to_status, "suppressed (unsubscribed/bounced)")
+
+
+def mark_leads_replied(emails: set[str]) -> int:
+    """Flip active Leads rows for the given emails to status=replied.
+
+    Used by the Reply Log reconcile sweep: any address listed in the 'Outreach Reply Log'
+    tab (auto-logged by the IMAP poll OR pasted in manually by the operator) stops its
+    sequence on the next run. Already-terminal leads are never touched."""
+    return _set_status_if_active({e: STATUS_REPLIED for e in emails}, "replied (Reply Log reconcile)")
 
 
 def get_leads_raw_values() -> list[list[str]]:
@@ -695,6 +710,38 @@ def append_reply_log(entry: dict) -> None:
         entry.get("snippet", ""),
     ]
     _with_backoff(ws.append_row, row, value_input_option="RAW")
+
+
+def get_reply_log_index() -> tuple[set[str], set[tuple[str, str, str]]]:
+    """One read of the 'Outreach Reply Log' tab → (emails, dedup_keys).
+
+    emails: lowercase col-A addresses (anything containing '@') — the reconcile sweep's
+    input, so a manually pasted row works as a kill-switch even with the other columns
+    blank. dedup_keys: (lead_email, reply_date, subject) tuples the IMAP poll checks
+    before appending, so the same reply is never logged twice across runs. Header row and
+    operator-pasted garbage (no '@' in col A) are skipped, never raised on. A missing tab
+    degrades to empty sets (mirrors get_suppression_set — optional layer, never a hard
+    dependency)."""
+    spreadsheet = _get_spreadsheet()
+    try:
+        ws = _with_backoff(spreadsheet.worksheet, "Outreach Reply Log")
+    except gspread.WorksheetNotFound:
+        return set(), set()
+    rows = _with_backoff(ws.get_all_values)
+    if not rows:
+        return set(), set()
+    start = 1 if rows[0] and rows[0][0].strip().lower() == "lead_email" else 0
+    emails: set[str] = set()
+    dedup_keys: set[tuple[str, str, str]] = set()
+    for row in rows[start:]:
+        if not row or "@" not in (row[0] if len(row) > 0 else ""):
+            continue
+        email = row[0].strip().lower()
+        emails.add(email)
+        reply_date = row[2].strip() if len(row) > 2 else ""
+        subject = row[3].strip() if len(row) > 3 else ""
+        dedup_keys.add((email, reply_date, subject))
+    return emails, dedup_keys
 
 
 def get_all_lead_emails_from_log() -> set[str]:
