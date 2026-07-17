@@ -28,9 +28,16 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          # The polled mailbox MUST be the one replies actually land in — i.e. SMTP_FROM's
+          # inbox (or REPLY_TO's, if set), since outreach replies go to the From/Reply-To
+          # address, not to GMAIL_SENDER. IMAP_USER secret overrides; GMAIL_SENDER is only
+          # the legacy fallback.
           IMAP_HOST: ${{ secrets.IMAP_HOST }}
-          IMAP_USER: ${{ secrets.GMAIL_SENDER }}
+          IMAP_USER: ${{ secrets.IMAP_USER || secrets.GMAIL_SENDER }}
           IMAP_PASS: ${{ secrets.IMAP_PASS }}
+          # Optional widened poll window (days). Empty-safe: config falls back to
+          # FOLLOWUP_DELAY_DAYS + 1. Set temporarily (e.g. 60) to backfill missed replies.
+          REPLY_POLL_DAYS_BACK: ${{ vars.REPLY_POLL_DAYS_BACK }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}

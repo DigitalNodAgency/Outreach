@@ -116,6 +116,10 @@ def send_outreach_summary(
     suppressed_new: int = 0,
     time_budget_hit: bool = False,
     deferred: int = 0,
+    replies_matched: int = 0,
+    replies_reconciled: int = 0,
+    reply_update_failures: int = 0,
+    reply_dupes_skipped: int = 0,
 ) -> None:
     """Phase 2 summary email to operator."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -140,7 +144,18 @@ def send_outreach_summary(
         f"SMTP health degraded:     {'YES — CHECK IMMEDIATELY' if health_degraded else 'no'}",
         f"Brevo suppressions:       {suppressed_unsub} unsub, {suppressed_bounced} bounced "
         f"({suppressed_new} newly added to Suppression tab)",
+        f"Replies:                  {replies_matched} new via IMAP, {replies_reconciled} "
+        f"reconciled from Reply Log tab" +
+        (f", {reply_dupes_skipped} dupes skipped" if reply_dupes_skipped else ""),
     ]
+
+    # Non-zero = a reply was logged whose address has no matching Leads row — the
+    # Reply Log and Leads tab disagree; sequences can't be stopped for that address.
+    if reply_update_failures:
+        lines.append(
+            f"Reply status failures:    {reply_update_failures} — CHECK: reply logged but "
+            f"no Leads row matched that email"
+        )
 
     if errors:
         lines += ["", f"Errors ({len(errors)}):"]
